@@ -20,4 +20,4 @@ Primary metric: uncached input + output tokens (median per task).
 ## Limits
 - n=3 per cell; no significance claims.
 - Tasks were chosen to favour cq (one large file) and there is no control task.
-- Raw events, stderr and diffs are omitted from the public copy (private target repository).
+- Raw events, stderr and diffs are omitted from the public copy (the target repository was private when this copy was made, 2026-10-03).

@@ -84,7 +84,7 @@ quarkify(companyjupiter)의 "everything is a folder" 아이디어에서 시작�
 ## 결론
 - 토큰 절감 주장은 실제 에이전트 기준으로 성립하지 않았다.
 - README가 내세우는 "신뢰/출처" 주장(추측 금지, 출처 기록)은 이번에 검증하지 않았다.
-- 원자료: `bench/results/2026-09-24T05-01-43-499Z/`, `bench/results/dryrun-1/` (실행별 지표와 요약만 있다. 대상 레포가 비공개라서 이벤트·stderr·diff 원본은 공개본에서 뺐다)
+- 원자료: `bench/results/2026-09-24T05-01-43-499Z/`, `bench/results/dryrun-1/` (실행별 지표와 요약만 있다. 대상 레포 GuardianAI가 공개본을 만들던 2026-10-03 당시 비공개였기 때문에 이벤트·stderr·diff 원본은 뺐다)
 
 ---
 
