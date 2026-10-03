@@ -1,0 +1,35 @@
+diff --git a/packages/utils/CHANGELOG.md b/packages/utils/CHANGELOG.md
+index 3c15764..318eef4 100644
+--- a/packages/utils/CHANGELOG.md
++++ b/packages/utils/CHANGELOG.md
+@@ -2,6 +2,10 @@
+ 
+ ## [Unreleased]
+ 
++### Fixed
++
++- Cleanup deadlines configured above the `setTimeout` maximum are now clamped instead of overflowing to a 1 ms timer.
++
+ ## [0.18.5] - 2026-09-30
+ 
+ ## [0.18.4] - 2026-09-30
+diff --git a/packages/utils/src/postmortem.ts b/packages/utils/src/postmortem.ts
+index 1d22f6b..1c58062 100644
+--- a/packages/utils/src/postmortem.ts
++++ b/packages/utils/src/postmortem.ts
+@@ -131,13 +131,14 @@ function runCleanup(reason: Reason, options: CleanupOptions = {}): Promise<void>
+  * the default).
+  */
+ const DEFAULT_CLEANUP_DEADLINE_MS = 5_000;
++const SET_TIMEOUT_MAX_MS = 2_147_483_647;
+ 
+ function resolveCleanupDeadlineMs(): number {
+ 	const raw = process.env.GJC_CLEANUP_DEADLINE_MS;
+ 	if (raw === undefined || raw.trim() === "") return DEFAULT_CLEANUP_DEADLINE_MS;
+ 	const parsed = Number(raw);
+ 	if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_CLEANUP_DEADLINE_MS;
+-	return parsed;
++	return Math.min(parsed, SET_TIMEOUT_MAX_MS);
+ }
+ 
+ async function awaitCleanupWithDeadline(reason: Reason, options: CleanupOptions = {}): Promise<void> {

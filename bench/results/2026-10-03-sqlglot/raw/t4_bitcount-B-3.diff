@@ -1,0 +1,63 @@
+diff --git a/sqlglot/dialects/clickhouse.py b/sqlglot/dialects/clickhouse.py
+index 75a0388..bb509cf 100644
+--- a/sqlglot/dialects/clickhouse.py
++++ b/sqlglot/dialects/clickhouse.py
+@@ -301,6 +301,7 @@ class ClickHouse(Dialect):
+ 
+         FUNCTIONS = {
+             **parser.Parser.FUNCTIONS,
++            "BITCOUNT": exp.BitCount.from_arg_list,
+             "ANY": exp.AnyValue.from_arg_list,
+             "ARRAYSUM": exp.ArraySum.from_arg_list,
+             "ARRAYREVERSE": exp.ArrayReverse.from_arg_list,
+@@ -971,6 +972,9 @@ class ClickHouse(Dialect):
+             return value
+ 
+     class Generator(generator.Generator):
++        def bitcount_sql(self, expression: exp.BitCount) -> str:
++            return self.func("bitCount", expression.this)
++
+         QUERY_HINTS = False
+         STRUCT_DELIMITER = ("(", ")")
+         NVL2_SUPPORTED = False
+diff --git a/sqlglot/expressions.py b/sqlglot/expressions.py
+index 522fd50..a741f99 100644
+--- a/sqlglot/expressions.py
++++ b/sqlglot/expressions.py
+@@ -5381,6 +5381,10 @@ class Func(Condition):
+         return {name: cls.from_arg_list for name in cls.sql_names()}
+ 
+ 
++class BitCount(Func):
++    arg_types = {"this": True}
++
++
+ class Typeof(Func):
+     pass
+ 
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+index 8e7b4b5..aea00cd 100644
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -3201,6 +3201,9 @@ class Generator(metaclass=_Generator):
+             self.sql(expression, "this"), *expression.expressions, normalize=not is_qualified
+         )
+ 
++    def bitcount_sql(self, expression: exp.BitCount) -> str:
++        return self.func("BIT_COUNT", expression.this)
++
+     def paren_sql(self, expression: exp.Paren) -> str:
+         sql = self.seg(self.indent(self.sql(expression, "this")), sep="")
+         return f"({sql}{self.seg(')', sep='')}"
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 367fce2..dc2f9e4 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -194,6 +194,7 @@ class Parser(metaclass=_Parser):
+     """
+ 
+     FUNCTIONS: t.Dict[str, t.Callable] = {
++        "BIT_COUNT": exp.BitCount.from_arg_list,
+         **{name: func.from_arg_list for name, func in exp.FUNCTION_BY_NAME.items()},
+         **dict.fromkeys(("COALESCE", "IFNULL", "NVL"), build_coalesce),
+         "ARRAY": lambda args, dialect: exp.Array(expressions=args),

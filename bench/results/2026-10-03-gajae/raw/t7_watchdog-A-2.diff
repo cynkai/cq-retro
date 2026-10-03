@@ -1,0 +1,96 @@
+diff --git a/packages/ai/src/providers/devin-acp.ts b/packages/ai/src/providers/devin-acp.ts
+index 47142db..8156db5 100644
+--- a/packages/ai/src/providers/devin-acp.ts
++++ b/packages/ai/src/providers/devin-acp.ts
+@@ -55,7 +55,11 @@ import type {
+ } from "../types";
+ import { kProviderResolvedToolCall, type ProviderResolvedCarrier } from "../utils/block-symbols";
+ import { AssistantMessageEventStream } from "../utils/event-stream";
+-import { getStreamFirstEventTimeoutMs, getStreamIdleTimeoutMs } from "../utils/idle-iterator";
++import {
++	clampStreamWatchdogTimeoutMs,
++	getStreamFirstEventTimeoutMs,
++	getStreamIdleTimeoutMs,
++} from "../utils/idle-iterator";
+ 
+ // ---------------------------------------------------------------------------
+ // Constants
+@@ -799,7 +803,7 @@ class DevinAcpBridge implements ProviderSessionState {
+ 			if (budgetMs === undefined || !Number.isFinite(budgetMs) || budgetMs <= 0) return;
+ 			watchdog = setTimeout(() => {
+ 				void this.cancelTurn(new Error(`Devin ACP ${label} timed out after ${budgetMs}ms`));
+-			}, budgetMs);
++			}, clampStreamWatchdogTimeoutMs(budgetMs));
+ 		};
+ 		const onAbort = () => {
+ 			void this.cancelTurn();
+diff --git a/packages/ai/src/utils/idle-iterator.ts b/packages/ai/src/utils/idle-iterator.ts
+index 5ba8b4e..494eef6 100644
+--- a/packages/ai/src/utils/idle-iterator.ts
++++ b/packages/ai/src/utils/idle-iterator.ts
+@@ -17,6 +17,13 @@ const OLLAMA_CLOUD_FIRST_EVENT_TIMEOUT_MS = 300_000;
+ 
+ const ANTHROPIC_STREAM_IDLE_TIMEOUT_MS = 300_000;
+ 
++/** Maximum delay accepted by the runtime timer APIs. */
++export const MAX_STREAM_WATCHDOG_TIMEOUT_MS = 2_147_483_647;
++
++export function clampStreamWatchdogTimeoutMs(timeoutMs: number): number {
++	return Math.min(timeoutMs, MAX_STREAM_WATCHDOG_TIMEOUT_MS);
++}
++
+ export function getProviderStreamIdleTimeoutFallbackMs(provider: string): number | undefined {
+ 	if (provider === "anthropic" || provider === "xai" || provider === "grok-build") {
+ 		return ANTHROPIC_STREAM_IDLE_TIMEOUT_MS;
+@@ -211,7 +218,7 @@ clearTimeout(dummyWatchdog);
+  */
+ export function createWatchdog(timeoutMs: number | undefined, onTimeout: () => void): Watchdog {
+ 	if (timeoutMs !== undefined && timeoutMs > 0) {
+-		return setTimeout(onTimeout, timeoutMs);
++		return setTimeout(onTimeout, clampStreamWatchdogTimeoutMs(timeoutMs));
+ 	}
+ 	return undefined;
+ }
+@@ -338,7 +345,7 @@ export async function* iterateWithIdleTimeout<T>(
+ 			if (enforceTimeout) {
+ 				const { promise, resolve } = Promise.withResolvers<{ kind: "timeout" }>();
+ 				resolveTimeout = resolve;
+-				timer = setTimeout(() => resolve({ kind: "timeout" }), activeTimeoutMs);
++				timer = setTimeout(() => resolve({ kind: "timeout" }), clampStreamWatchdogTimeoutMs(activeTimeoutMs!));
+ 				racers.push(promise);
+ 			}
+ 
+diff --git a/packages/ai/test/idle-iterator.test.ts b/packages/ai/test/idle-iterator.test.ts
+index 80f7471..a0327d0 100644
+--- a/packages/ai/test/idle-iterator.test.ts
++++ b/packages/ai/test/idle-iterator.test.ts
+@@ -1,6 +1,11 @@
+ import { afterEach, describe, expect, it, vi } from "bun:test";
+ import { STREAM_FIRST_EVENT_TIMEOUT_PROVIDER_CODE, transportFailureFacts } from "../src/utils/fallback-transport";
+-import { FirstEventTimeoutError, iterateWithIdleTimeout } from "../src/utils/idle-iterator";
++import {
++	createWatchdog,
++	FirstEventTimeoutError,
++	iterateWithIdleTimeout,
++	MAX_STREAM_WATCHDOG_TIMEOUT_MS,
++} from "../src/utils/idle-iterator";
+ 
+ async function waitForTimerRegistration(): Promise<void> {
+ 	await Promise.resolve();
+@@ -13,6 +18,16 @@ describe("iterateWithIdleTimeout transport facts", () => {
+ 		vi.restoreAllMocks();
+ 	});
+ 
++	it("caps watchdog delays at the runtime timer maximum", () => {
++		vi.useFakeTimers();
++		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
++		const watchdog = createWatchdog(MAX_STREAM_WATCHDOG_TIMEOUT_MS + 1, () => {});
++
++		expect(watchdog).toBeDefined();
++		expect(setTimeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), MAX_STREAM_WATCHDOG_TIMEOUT_MS);
++		clearTimeout(watchdog);
++	});
++
+ 	it("normalizes the typed first-event timeout fact idempotently", () => {
+ 		const error = new FirstEventTimeoutError("first event timed out");
+ 		const facts = transportFailureFacts(error);

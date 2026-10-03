@@ -1,0 +1,88 @@
+diff --git a/packages/coding-agent/src/coordinator-mcp/server.ts b/packages/coding-agent/src/coordinator-mcp/server.ts
+index 560d8a3..aa02dd9 100644
+--- a/packages/coding-agent/src/coordinator-mcp/server.ts
++++ b/packages/coding-agent/src/coordinator-mcp/server.ts
+@@ -2620,8 +2620,8 @@ export async function appendCoordinatorEventForTest(
+ 	return appendCoordinatorEvent(namespaceDir, input);
+ }
+ 
+-function boundedEventLimit(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++export function boundedEventLimit(value: unknown): number {
++	const parsed = parseNumericArgument(value);
+ 	if (!Number.isFinite(parsed) || parsed <= 0) return 100;
+ 	return Math.min(parsed, 100);
+ }
+@@ -3189,8 +3189,14 @@ export const COORDINATOR_RUNTIME_PROMPT_ACK_TIMEOUT_MAX_MS = MAX_RUNTIME_PROMPT_
+ export const COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS = 30_000;
+ export const COORDINATOR_POLL_INTERVAL_MAX_MS = 10_000;
+ 
++function parseNumericArgument(value: unknown): number {
++	if (typeof value === "number") return value;
++	if (typeof value !== "string" || !/^\d+$/.test(value.trim())) return Number.NaN;
++	return Number(value.trim());
++}
++
+ function parsePositiveIntegerMs(value: unknown, fallback: number): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = parseNumericArgument(value);
+ 	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+ }
+ 
+@@ -3206,7 +3212,7 @@ export function boundedRuntimePromptAckTimeoutMs(value: unknown): number {
+ }
+ 
+ export function boundedEventWatchTimeoutMs(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = parseNumericArgument(value);
+ 	if (parsed === 0) return 0;
+ 	return Math.min(Number.isFinite(parsed) && parsed > 0 ? parsed : 1000, COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS);
+ }
+@@ -3215,8 +3221,8 @@ export function boundedPollIntervalMs(value: unknown): number {
+ 	return Math.min(Math.max(parsePositiveIntegerMs(value, 100), 10), COORDINATOR_POLL_INTERVAL_MAX_MS);
+ }
+ 
+-function boundedLineCount(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++export function boundedLineCount(value: unknown): number {
++	const parsed = parseNumericArgument(value);
+ 	if (!Number.isFinite(parsed) || parsed <= 0) return 80;
+ 	return Math.min(parsed, 400);
+ }
+diff --git a/packages/coding-agent/test/coordinator-mcp/numeric-arguments.test.ts b/packages/coding-agent/test/coordinator-mcp/numeric-arguments.test.ts
+new file mode 100644
+index 0000000..5cf1dd8
+--- /dev/null
++++ b/packages/coding-agent/test/coordinator-mcp/numeric-arguments.test.ts
+@@ -0,0 +1,31 @@
++import { describe, expect, it } from "bun:test";
++import {
++	boundedAwaitTurnTimeoutMs,
++	boundedEventLimit,
++	boundedEventWatchTimeoutMs,
++	boundedLineCount,
++	boundedPollIntervalMs,
++} from "../../src/coordinator-mcp/server";
++
++describe("coordinator numeric arguments", () => {
++	it("accepts numbers and trimmed decimal digit strings", () => {
++		expect(boundedAwaitTurnTimeoutMs(1_500)).toBe(1_500);
++		expect(boundedAwaitTurnTimeoutMs(" 1500 ")).toBe(1_500);
++		expect(boundedEventLimit("25")).toBe(25);
++		expect(boundedEventWatchTimeoutMs("0")).toBe(0);
++		expect(boundedPollIntervalMs(" 250 ")).toBe(250);
++		expect(boundedLineCount("40")).toBe(40);
++	});
++
++	it("uses each argument's default for malformed values", () => {
++		const malformed = ["1e4", "5s", "1.5", [50]];
++
++		for (const value of malformed) {
++			expect(boundedAwaitTurnTimeoutMs(value)).toBe(1_000);
++			expect(boundedEventLimit(value)).toBe(100);
++			expect(boundedEventWatchTimeoutMs(value)).toBe(1_000);
++			expect(boundedPollIntervalMs(value)).toBe(100);
++			expect(boundedLineCount(value)).toBe(80);
++		}
++	});
++});

@@ -1,0 +1,91 @@
+diff --git a/packages/coding-agent/src/coordinator-mcp/server.ts b/packages/coding-agent/src/coordinator-mcp/server.ts
+index 560d8a3..09bfd88 100644
+--- a/packages/coding-agent/src/coordinator-mcp/server.ts
++++ b/packages/coding-agent/src/coordinator-mcp/server.ts
+@@ -2621,7 +2621,7 @@ export async function appendCoordinatorEventForTest(
+ }
+ 
+ function boundedEventLimit(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = parseNumericToolArgument(value);
+ 	if (!Number.isFinite(parsed) || parsed <= 0) return 100;
+ 	return Math.min(parsed, 100);
+ }
+@@ -3189,8 +3189,17 @@ export const COORDINATOR_RUNTIME_PROMPT_ACK_TIMEOUT_MAX_MS = MAX_RUNTIME_PROMPT_
+ export const COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS = 30_000;
+ export const COORDINATOR_POLL_INTERVAL_MAX_MS = 10_000;
+ 
++// MCP clients may provide numbers or strings, but strings must be complete
++// decimal integers. Number.parseInt would accept a leading digit prefix (for
++// example, "1e4" as 1), and String(value) would make arrays look valid.
++function parseNumericToolArgument(value: unknown): number {
++	if (typeof value === "number") return value;
++	if (typeof value !== "string" || !/^\d+$/.test(value.trim())) return Number.NaN;
++	return Number(value.trim());
++}
++
+ function parsePositiveIntegerMs(value: unknown, fallback: number): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = parseNumericToolArgument(value);
+ 	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+ }
+ 
+@@ -3206,7 +3215,7 @@ export function boundedRuntimePromptAckTimeoutMs(value: unknown): number {
+ }
+ 
+ export function boundedEventWatchTimeoutMs(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = parseNumericToolArgument(value);
+ 	if (parsed === 0) return 0;
+ 	return Math.min(Number.isFinite(parsed) && parsed > 0 ? parsed : 1000, COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS);
+ }
+@@ -3216,7 +3225,7 @@ export function boundedPollIntervalMs(value: unknown): number {
+ }
+ 
+ function boundedLineCount(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = parseNumericToolArgument(value);
+ 	if (!Number.isFinite(parsed) || parsed <= 0) return 80;
+ 	return Math.min(parsed, 400);
+ }
+diff --git a/packages/coding-agent/test/coordinator-mcp-server.test.ts b/packages/coding-agent/test/coordinator-mcp-server.test.ts
+index 736ca9e..788877f 100644
+--- a/packages/coding-agent/test/coordinator-mcp-server.test.ts
++++ b/packages/coding-agent/test/coordinator-mcp-server.test.ts
+@@ -38,6 +38,10 @@ import {
+ 	appendCoordinatorEventForTest,
+ 	awaitCodexWakePublishesForTest,
+ 	awaitEventWebhookDeliveriesForTest,
++	boundedAwaitTurnTimeoutMs,
++	boundedEventWatchTimeoutMs,
++	boundedPollIntervalMs,
++	boundedRuntimePromptAckTimeoutMs,
+ 	type CoordinatorMcpServer,
+ 	createCoordinatorMcpServer,
+ 	readCoordinatorArtifact,
+@@ -102,6 +106,25 @@ const GATE_RESOLVED_AT = new Date(Date.now() - 60_000).toISOString();
+ 
+ const tempDirs: string[] = [];
+ 
++describe("Coordinator MCP numeric tool arguments", () => {
++	it("falls back for malformed values instead of parsing digit prefixes", () => {
++		const malformed = ["1e4", "5s", "1.5", [50]];
++		for (const value of malformed) {
++			expect(boundedAwaitTurnTimeoutMs(value)).toBe(1000);
++			expect(boundedRuntimePromptAckTimeoutMs(value)).toBe(10_000);
++			expect(boundedEventWatchTimeoutMs(value)).toBe(1000);
++			expect(boundedPollIntervalMs(value)).toBe(100);
++		}
++	});
++
++	it("accepts numbers and surrounding-whitespace decimal strings", () => {
++		expect(boundedAwaitTurnTimeoutMs(2500)).toBe(2500);
++		expect(boundedAwaitTurnTimeoutMs(" 2500 ")).toBe(2500);
++		expect(boundedEventWatchTimeoutMs(" 0 ")).toBe(0);
++		expect(boundedPollIntervalMs(" 250 ")).toBe(250);
++	});
++});
++
+ async function tempRoot(): Promise<string> {
+ 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "gjc-coordinator-server-"));
+ 	const canonical = await fs.realpath(dir);

@@ -1,0 +1,35 @@
+diff --git a/sqlglot/dialects/clickhouse.py b/sqlglot/dialects/clickhouse.py
+index 75a0388..53810ba 100644
+--- a/sqlglot/dialects/clickhouse.py
++++ b/sqlglot/dialects/clickhouse.py
+@@ -305,6 +305,7 @@ class ClickHouse(Dialect):
+             "ARRAYSUM": exp.ArraySum.from_arg_list,
+             "ARRAYREVERSE": exp.ArrayReverse.from_arg_list,
+             "ARRAYSLICE": exp.ArraySlice.from_arg_list,
++            "BITCOUNT": exp.BitCount.from_arg_list,
+             "COUNTIF": _build_count_if,
+             "DATE_ADD": build_date_delta(exp.DateAdd, default_unit=None),
+             "DATEADD": build_date_delta(exp.DateAdd, default_unit=None),
+@@ -1064,6 +1065,7 @@ class ClickHouse(Dialect):
+ 
+         TRANSFORMS = {
+             **generator.Generator.TRANSFORMS,
++            exp.BitCount: rename_func("bitCount"),
+             exp.AnyValue: rename_func("any"),
+             exp.ApproxDistinct: rename_func("uniq"),
+             exp.ArrayConcat: rename_func("arrayConcat"),
+diff --git a/sqlglot/expressions.py b/sqlglot/expressions.py
+index 522fd50..cf1445d 100644
+--- a/sqlglot/expressions.py
++++ b/sqlglot/expressions.py
+@@ -5433,6 +5433,10 @@ class Anonymous(Func):
+         return self.this if isinstance(self.this, str) else self.this.name
+ 
+ 
++class BitCount(Func):
++    arg_types = {"this": True}
++
++
+ class AnonymousAggFunc(AggFunc):
+     arg_types = {"this": True, "expressions": False}
+     is_var_len_args = True

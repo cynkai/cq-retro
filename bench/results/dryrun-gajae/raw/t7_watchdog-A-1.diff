@@ -1,0 +1,90 @@
+diff --git a/packages/ai/src/utils/idle-iterator.ts b/packages/ai/src/utils/idle-iterator.ts
+index 5ba8b4e..5df46ec 100644
+--- a/packages/ai/src/utils/idle-iterator.ts
++++ b/packages/ai/src/utils/idle-iterator.ts
+@@ -17,6 +17,13 @@ const OLLAMA_CLOUD_FIRST_EVENT_TIMEOUT_MS = 300_000;
+ 
+ const ANTHROPIC_STREAM_IDLE_TIMEOUT_MS = 300_000;
+ 
++/** The largest delay supported by the runtime timer API. */
++export const MAX_TIMER_DELAY_MS = 2_147_483_647;
++
++function setWatchdogTimeout(callback: () => void, delayMs: number): NodeJS.Timeout {
++	return setTimeout(callback, Math.min(delayMs, MAX_TIMER_DELAY_MS));
++}
++
+ export function getProviderStreamIdleTimeoutFallbackMs(provider: string): number | undefined {
+ 	if (provider === "anthropic" || provider === "xai" || provider === "grok-build") {
+ 		return ANTHROPIC_STREAM_IDLE_TIMEOUT_MS;
+@@ -211,7 +218,7 @@ clearTimeout(dummyWatchdog);
+  */
+ export function createWatchdog(timeoutMs: number | undefined, onTimeout: () => void): Watchdog {
+ 	if (timeoutMs !== undefined && timeoutMs > 0) {
+-		return setTimeout(onTimeout, timeoutMs);
++		return setWatchdogTimeout(onTimeout, timeoutMs);
+ 	}
+ 	return undefined;
+ }
+@@ -338,7 +345,7 @@ export async function* iterateWithIdleTimeout<T>(
+ 			if (enforceTimeout) {
+ 				const { promise, resolve } = Promise.withResolvers<{ kind: "timeout" }>();
+ 				resolveTimeout = resolve;
+-				timer = setTimeout(() => resolve({ kind: "timeout" }), activeTimeoutMs);
++				timer = setWatchdogTimeout(() => resolve({ kind: "timeout" }), activeTimeoutMs!);
+ 				racers.push(promise);
+ 			}
+ 
+diff --git a/packages/ai/test/idle-iterator.test.ts b/packages/ai/test/idle-iterator.test.ts
+index 80f7471..4df0045 100644
+--- a/packages/ai/test/idle-iterator.test.ts
++++ b/packages/ai/test/idle-iterator.test.ts
+@@ -1,6 +1,11 @@
+ import { afterEach, describe, expect, it, vi } from "bun:test";
+ import { STREAM_FIRST_EVENT_TIMEOUT_PROVIDER_CODE, transportFailureFacts } from "../src/utils/fallback-transport";
+-import { FirstEventTimeoutError, iterateWithIdleTimeout } from "../src/utils/idle-iterator";
++import {
++	createWatchdog,
++	FirstEventTimeoutError,
++	iterateWithIdleTimeout,
++	MAX_TIMER_DELAY_MS,
++} from "../src/utils/idle-iterator";
+ 
+ async function waitForTimerRegistration(): Promise<void> {
+ 	await Promise.resolve();
+@@ -119,6 +124,36 @@ describe("iterateWithIdleTimeout transport facts", () => {
+ 		expect(iteratorClosed).toBe(true);
+ 	});
+ 
++	it("caps standalone watchdog delays at the runtime timer maximum", () => {
++		vi.useFakeTimers();
++		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
++
++		const watchdog = createWatchdog(MAX_TIMER_DELAY_MS + 1, () => {});
++
++		expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), MAX_TIMER_DELAY_MS);
++		clearTimeout(watchdog);
++	});
++
++	it("caps iterator watchdog delays at the runtime timer maximum", async () => {
++		vi.useFakeTimers();
++		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
++		const source = (async function* () {
++			yield "progress";
++			await new Promise<never>(() => {});
++		})();
++
++		const iterator = iterateWithIdleTimeout(source, {
++			firstItemTimeoutMs: MAX_TIMER_DELAY_MS + 1,
++			idleTimeoutMs: MAX_TIMER_DELAY_MS + 1,
++			errorMessage: "stream idle",
++		});
++		expect((await iterator.next()).value).toBe("progress");
++		await waitForTimerRegistration();
++
++		expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), MAX_TIMER_DELAY_MS);
++		await iterator.return(undefined);
++	});
++
+ 	it("stamps first-item expiry as FirstEventTimeoutError with transport facts", async () => {
+ 		vi.useFakeTimers();
+ 		const source = (async function* () {

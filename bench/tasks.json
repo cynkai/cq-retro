@@ -1,0 +1,24 @@
+{
+  "repo": "~/GuardianAI",
+  "model": "gpt-5.6-luna",
+  "effort": "low",
+  "gate": {
+    "min_token_reduction": 0.2,
+    "min_cq_call_rate": 0.7
+  },
+  "tasks": [
+    {
+      "id": "t1_cvss",
+      "prompt": "Make cvss_label raise a ValueError when the score is below 0 or above 10. Scores from 0 to 10 must keep their current labels.",
+      "check": "checks/t1_cvss.py"
+    },
+    {
+      "id": "t2_kv",
+      "prompt": "In the PDF report, RedTeamPDF.kv should print \"-\" as the value when the value is None or an empty string. Other values, including 0, must print as before.",
+      "check": "checks/t2_kv.py"
+    }
+  ],
+  "limits": [
+    "Tasks were chosen to favour cq (one large file) and there is no control task."
+  ]
+}

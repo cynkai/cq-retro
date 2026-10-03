@@ -1,0 +1,98 @@
+diff --git a/packages/coding-agent/changelog.d/coordinator-mcp-strict-numeric-args.md b/packages/coding-agent/changelog.d/coordinator-mcp-strict-numeric-args.md
+new file mode 100644
+index 0000000..88848da
+--- /dev/null
++++ b/packages/coding-agent/changelog.d/coordinator-mcp-strict-numeric-args.md
+@@ -0,0 +1,3 @@
++### Fixed
++
++- Make coordinator MCP timeout, polling, limit, and line-count arguments reject malformed numeric values instead of partially parsing them.
+diff --git a/packages/coding-agent/src/coordinator-mcp/server.ts b/packages/coding-agent/src/coordinator-mcp/server.ts
+index 560d8a3..0827d7f 100644
+--- a/packages/coding-agent/src/coordinator-mcp/server.ts
++++ b/packages/coding-agent/src/coordinator-mcp/server.ts
+@@ -2621,7 +2621,7 @@ export async function appendCoordinatorEventForTest(
+ }
+ 
+ function boundedEventLimit(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = strictInteger(value);
+ 	if (!Number.isFinite(parsed) || parsed <= 0) return 100;
+ 	return Math.min(parsed, 100);
+ }
+@@ -3190,10 +3190,17 @@ export const COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS = 30_000;
+ export const COORDINATOR_POLL_INTERVAL_MAX_MS = 10_000;
+ 
+ function parsePositiveIntegerMs(value: unknown, fallback: number): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = strictInteger(value);
+ 	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+ }
+ 
++function strictInteger(value: unknown): number {
++	if (typeof value === "number") return Number.isSafeInteger(value) ? value : Number.NaN;
++	if (typeof value !== "string" || !/^\d+$/.test(value.trim())) return Number.NaN;
++	const parsed = Number(value.trim());
++	return Number.isSafeInteger(parsed) ? parsed : Number.NaN;
++}
++
+ export function boundedAwaitTurnTimeoutMs(value: unknown): number {
+ 	return Math.min(parsePositiveIntegerMs(value, 1000), COORDINATOR_AWAIT_TURN_TIMEOUT_MAX_MS);
+ }
+@@ -3206,7 +3213,7 @@ export function boundedRuntimePromptAckTimeoutMs(value: unknown): number {
+ }
+ 
+ export function boundedEventWatchTimeoutMs(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = strictInteger(value);
+ 	if (parsed === 0) return 0;
+ 	return Math.min(Number.isFinite(parsed) && parsed > 0 ? parsed : 1000, COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS);
+ }
+@@ -3216,7 +3223,7 @@ export function boundedPollIntervalMs(value: unknown): number {
+ }
+ 
+ function boundedLineCount(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = strictInteger(value);
+ 	if (!Number.isFinite(parsed) || parsed <= 0) return 80;
+ 	return Math.min(parsed, 400);
+ }
+diff --git a/packages/coding-agent/test/coordinator-mcp-server.test.ts b/packages/coding-agent/test/coordinator-mcp-server.test.ts
+index 736ca9e..02af20d 100644
+--- a/packages/coding-agent/test/coordinator-mcp-server.test.ts
++++ b/packages/coding-agent/test/coordinator-mcp-server.test.ts
+@@ -38,6 +38,9 @@ import {
+ 	appendCoordinatorEventForTest,
+ 	awaitCodexWakePublishesForTest,
+ 	awaitEventWebhookDeliveriesForTest,
++	boundedAwaitTurnTimeoutMs,
++	boundedEventWatchTimeoutMs,
++	boundedPollIntervalMs,
+ 	type CoordinatorMcpServer,
+ 	createCoordinatorMcpServer,
+ 	readCoordinatorArtifact,
+@@ -187,6 +190,24 @@ afterEach(async () => {
+ 	await Promise.all(tempDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
+ });
+ 
++describe("Coordinator MCP numeric argument parsing", () => {
++	it("accepts numbers and whitespace-wrapped decimal strings only", () => {
++		expect(boundedAwaitTurnTimeoutMs(1500)).toBe(1500);
++		expect(boundedAwaitTurnTimeoutMs(" 1500 ")).toBe(1500);
++		expect(boundedPollIntervalMs(" 250 ")).toBe(250);
++		expect(boundedEventWatchTimeoutMs(0)).toBe(0);
++		expect(boundedEventWatchTimeoutMs(" 0 ")).toBe(0);
++	});
++
++	it("uses defaults for prefix-parsed and non-integer values", () => {
++		for (const value of ["1e4", "5s", "1.5", [50], 1.5, Number.POSITIVE_INFINITY]) {
++			expect(boundedAwaitTurnTimeoutMs(value)).toBe(1000);
++			expect(boundedPollIntervalMs(value)).toBe(100);
++			expect(boundedEventWatchTimeoutMs(value)).toBe(1000);
++		}
++	});
++});
++
+ type SdkControl = { operation: string; input: Record<string, unknown>; idempotencyKey?: string };
+ 
+ type SdkControlServerOptions = {

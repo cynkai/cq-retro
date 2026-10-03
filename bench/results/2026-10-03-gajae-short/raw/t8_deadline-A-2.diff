@@ -1,0 +1,93 @@
+diff --git a/packages/utils/changelog.d/clamp-cleanup-deadline.md b/packages/utils/changelog.d/clamp-cleanup-deadline.md
+new file mode 100644
+index 0000000..7037f02
+--- /dev/null
++++ b/packages/utils/changelog.d/clamp-cleanup-deadline.md
+@@ -0,0 +1,3 @@
++### Fixed
++
++- Clamp oversized `GJC_CLEANUP_DEADLINE_MS` values to the maximum delay supported by `setTimeout`, preventing cleanup from expiring after 1 ms.
+diff --git a/packages/utils/src/postmortem.ts b/packages/utils/src/postmortem.ts
+index 1d22f6b..93a44b1 100644
+--- a/packages/utils/src/postmortem.ts
++++ b/packages/utils/src/postmortem.ts
+@@ -128,16 +128,18 @@ function runCleanup(reason: Reason, options: CleanupOptions = {}): Promise<void>
+  *
+  * The deadline defaults to 5000 ms and can be overridden with
+  * `GJC_CLEANUP_DEADLINE_MS` (finite values >= 0; anything else falls back to
+- * the default).
++ * the default). Values above the maximum delay accepted by `setTimeout` are
++ * clamped to that maximum.
+  */
+ const DEFAULT_CLEANUP_DEADLINE_MS = 5_000;
++const MAX_CLEANUP_DEADLINE_MS = 2_147_483_647;
+ 
+ function resolveCleanupDeadlineMs(): number {
+ 	const raw = process.env.GJC_CLEANUP_DEADLINE_MS;
+ 	if (raw === undefined || raw.trim() === "") return DEFAULT_CLEANUP_DEADLINE_MS;
+ 	const parsed = Number(raw);
+ 	if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_CLEANUP_DEADLINE_MS;
+-	return parsed;
++	return Math.min(parsed, MAX_CLEANUP_DEADLINE_MS);
+ }
+ 
+ async function awaitCleanupWithDeadline(reason: Reason, options: CleanupOptions = {}): Promise<void> {
+diff --git a/packages/utils/test/postmortem-fixture.ts b/packages/utils/test/postmortem-fixture.ts
+index 5e57a6a..57ddf05 100644
+--- a/packages/utils/test/postmortem-fixture.ts
++++ b/packages/utils/test/postmortem-fixture.ts
+@@ -344,6 +344,17 @@ async function runCleanupDeadlineFatal(): Promise<void> {
+ 	await throwFromTimer(new Error("fixture: fatal with hung cleanup"));
+ }
+ 
++async function runCleanupDeadlineAboveTimerMaximum(): Promise<void> {
++	process.env.GJC_CLEANUP_DEADLINE_MS = "2147483648";
++	postmortem.register("fixture-deadline-above-timer-maximum", async () => {
++		await Bun.sleep(50);
++		writeResult({ completed: true });
++	});
++
++	process.kill(process.pid, "SIGTERM");
++	await Bun.sleep(5_000);
++}
++
+ async function runQuitDrainsBackpressuredStderr(): Promise<void> {
+ 	setInterval(() => {}, 1_000);
+ 	const diagnosticLine = "timing-diagnostic\n";
+@@ -371,6 +382,9 @@ switch (scenario) {
+ 	case "cleanup-deadline-fatal":
+ 		await runCleanupDeadlineFatal();
+ 		break;
++	case "cleanup-deadline-above-timer-maximum":
++		await runCleanupDeadlineAboveTimerMaximum();
++		break;
+ 	case "quit-drains-backpressured-stderr":
+ 		await runQuitDrainsBackpressuredStderr();
+ 		break;
+diff --git a/packages/utils/test/postmortem.test.ts b/packages/utils/test/postmortem.test.ts
+index cf6a88d..9b8d127 100644
+--- a/packages/utils/test/postmortem.test.ts
++++ b/packages/utils/test/postmortem.test.ts
+@@ -15,6 +15,7 @@ interface ScenarioResult {
+ interface FixtureResult {
+ 	count: number;
+ 	exitBeforeCleanupFinished?: boolean;
++	completed?: boolean;
+ 	started?: boolean;
+ }
+ 
+@@ -160,6 +161,14 @@ describe("postmortem cleanup deadline contract (issue #2556)", () => {
+ 		expect(result.stderr).toContain("cleanup deadline (300ms) expired for uncaught_exception");
+ 	});
+ 
++	it("clamps deadlines above the setTimeout maximum instead of expiring immediately", async () => {
++		const result = await runScenario("cleanup-deadline-above-timer-maximum");
++
++		expect(result.exitCode).toBe(143);
++		expect(parseResult(result.stdout).completed).toBe(true);
++		expect(result.stderr).not.toContain("cleanup deadline");
++	});
++
+ 	it("quit drains backpressured stderr before preserving the requested exit code", async () => {
+ 		const proc = Bun.spawn([process.execPath, fixturePath, "quit-drains-backpressured-stderr"], {
+ 			cwd: utilsDirectory,

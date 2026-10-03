@@ -1,0 +1,116 @@
+diff --git a/packages/ai/changelog.d/stream-watchdog-timeout-cap.md b/packages/ai/changelog.d/stream-watchdog-timeout-cap.md
+new file mode 100644
+index 0000000..8399b4a
+--- /dev/null
++++ b/packages/ai/changelog.d/stream-watchdog-timeout-cap.md
+@@ -0,0 +1,3 @@
++### Fixed
++
++- Cap stream idle and first-event watchdog delays at the maximum supported by `setTimeout`, preventing oversized timeout values from firing after 1 ms in Bun.
+diff --git a/packages/ai/src/utils/idle-iterator.ts b/packages/ai/src/utils/idle-iterator.ts
+index 5ba8b4e..18d34d6 100644
+--- a/packages/ai/src/utils/idle-iterator.ts
++++ b/packages/ai/src/utils/idle-iterator.ts
+@@ -16,6 +16,8 @@ const LM_STUDIO_FIRST_EVENT_TIMEOUT_MS = 300_000;
+ const OLLAMA_CLOUD_FIRST_EVENT_TIMEOUT_MS = 300_000;
+ 
+ const ANTHROPIC_STREAM_IDLE_TIMEOUT_MS = 300_000;
++/** Maximum delay accepted by setTimeout before Bun wraps it to a 1ms timer. */
++export const MAX_SET_TIMEOUT_DELAY_MS = 2 ** 31 - 1;
+ 
+ export function getProviderStreamIdleTimeoutFallbackMs(provider: string): number | undefined {
+ 	if (provider === "anthropic" || provider === "xai" || provider === "grok-build") {
+@@ -49,7 +51,7 @@ function normalizeIdleTimeoutMs(value: string | undefined, fallback: number): nu
+ 	const parsed = Number(value);
+ 	if (!Number.isFinite(parsed)) return fallback;
+ 	if (parsed <= 0) return undefined;
+-	return Math.trunc(parsed);
++	return Math.min(MAX_SET_TIMEOUT_DELAY_MS, Math.trunc(parsed));
+ }
+ 
+ /**
+@@ -211,7 +213,7 @@ clearTimeout(dummyWatchdog);
+  */
+ export function createWatchdog(timeoutMs: number | undefined, onTimeout: () => void): Watchdog {
+ 	if (timeoutMs !== undefined && timeoutMs > 0) {
+-		return setTimeout(onTimeout, timeoutMs);
++		return setTimeout(onTimeout, Math.min(MAX_SET_TIMEOUT_DELAY_MS, timeoutMs));
+ 	}
+ 	return undefined;
+ }
+@@ -338,7 +340,11 @@ export async function* iterateWithIdleTimeout<T>(
+ 			if (enforceTimeout) {
+ 				const { promise, resolve } = Promise.withResolvers<{ kind: "timeout" }>();
+ 				resolveTimeout = resolve;
+-				timer = setTimeout(() => resolve({ kind: "timeout" }), activeTimeoutMs);
++				const timeoutDelayMs = activeTimeoutMs ?? 0;
++				timer = setTimeout(
++					() => resolve({ kind: "timeout" }),
++					Math.min(MAX_SET_TIMEOUT_DELAY_MS, timeoutDelayMs),
++				);
+ 				racers.push(promise);
+ 			}
+ 
+diff --git a/packages/ai/test/idle-iterator.test.ts b/packages/ai/test/idle-iterator.test.ts
+index 80f7471..393a150 100644
+--- a/packages/ai/test/idle-iterator.test.ts
++++ b/packages/ai/test/idle-iterator.test.ts
+@@ -119,6 +119,39 @@ describe("iterateWithIdleTimeout transport facts", () => {
+ 		expect(iteratorClosed).toBe(true);
+ 	});
+ 
++	it("caps oversized caller watchdog delays instead of scheduling an immediate timeout", async () => {
++		vi.useFakeTimers();
++		const source = (async function* () {
++			yield "progress";
++			await new Promise<never>(() => {});
++		})();
++		const iterator = iterateWithIdleTimeout(source, {
++			firstItemTimeoutMs: 2 ** 31,
++			idleTimeoutMs: 2 ** 31,
++			errorMessage: "stream idle",
++		});
++
++		expect((await iterator.next()).value).toBe("progress");
++		const pending = iterator.next();
++		let settled = false;
++		void pending.then(
++			() => {
++				settled = true;
++			},
++			() => {
++				settled = true;
++			},
++		);
++		await waitForTimerRegistration();
++		vi.advanceTimersByTime(1);
++		await Promise.resolve();
++		expect(settled).toBe(false);
++
++		vi.advanceTimersByTime(2 ** 31 - 1);
++		const error = await pending.catch(reason => reason);
++		expect(error).toBeInstanceOf(Error);
++	});
++
+ 	it("stamps first-item expiry as FirstEventTimeoutError with transport facts", async () => {
+ 		vi.useFakeTimers();
+ 		const source = (async function* () {
+diff --git a/packages/ai/test/stream-timeout-defaults.test.ts b/packages/ai/test/stream-timeout-defaults.test.ts
+index d0e540d..ded23ee 100644
+--- a/packages/ai/test/stream-timeout-defaults.test.ts
++++ b/packages/ai/test/stream-timeout-defaults.test.ts
+@@ -111,6 +111,14 @@ describe("getStreamIdleTimeoutMs(fallbackMs)", () => {
+ 		Bun.env.GJC_OPENAI_STREAM_IDLE_TIMEOUT_MS = "0";
+ 		expect(getStreamIdleTimeoutMs(300_000)).toBeUndefined();
+ 	});
++
++	it("caps oversized env delays at the setTimeout maximum", () => {
++		Bun.env.PI_STREAM_IDLE_TIMEOUT_MS = String(2 ** 31);
++		expect(getStreamIdleTimeoutMs()).toBe(2 ** 31 - 1);
++
++		Bun.env.PI_STREAM_FIRST_EVENT_TIMEOUT_MS = String(2 ** 31);
++		expect(getStreamFirstEventTimeoutMs()).toBe(2 ** 31 - 1);
++	});
+ });
+ 
+ describe("getOpenAIStreamIdleTimeoutMs()", () => {

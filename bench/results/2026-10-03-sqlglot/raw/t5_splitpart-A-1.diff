@@ -1,0 +1,53 @@
+diff --git a/sqlglot/dialects/tsql.py b/sqlglot/dialects/tsql.py
+index 1298dca..2081853 100644
+--- a/sqlglot/dialects/tsql.py
++++ b/sqlglot/dialects/tsql.py
+@@ -1139,7 +1139,7 @@ class TSQL(Dialect):
+                 self.unsupported(
+                     "SPLIT_PART can be transpiled to PARSENAME only for '.' delimiter and literal values"
+                 )
+-                return ""
++                return self.func("SPLIT_PART", this, delimiter, part_index)
+ 
+             return self.func(
+                 "PARSENAME", this, exp.Literal.number(split_count + 1 - part_index.to_py())
+diff --git a/tests/dialects/test_tsql.py b/tests/dialects/test_tsql.py
+index c9dca79..1dd9743 100644
+--- a/tests/dialects/test_tsql.py
++++ b/tests/dialects/test_tsql.py
+@@ -1,4 +1,4 @@
+-from sqlglot import exp, parse, parse_one
++from sqlglot import ErrorLevel, exp, parse, parse_one
+ from sqlglot.errors import ParseError, UnsupportedError
+ from sqlglot.optimizer.annotate_types import annotate_types
+ from tests.dialects.test_dialect import Validator
+@@ -2282,7 +2282,7 @@ FROM OPENJSON(@json) WITH (
+             write={
+                 "spark": "SELECT SPLIT_PART('1,2,3', ',', 1)",
+                 "databricks": "SELECT SPLIT_PART('1,2,3', ',', 1)",
+-                "tsql": UnsupportedError,
++                "tsql": "SELECT SPLIT_PART('1,2,3', ',', 1)",
+             },
+         )
+ 
+@@ -2292,10 +2292,19 @@ FROM OPENJSON(@json) WITH (
+             write={
+                 "spark": "WITH t AS (SELECT 'a.b.c' AS value, 1 AS idx) SELECT SPLIT_PART(value, '.', idx) FROM t",
+                 "databricks": "WITH t AS (SELECT 'a.b.c' AS value, 1 AS idx) SELECT SPLIT_PART(value, '.', idx) FROM t",
+-                "tsql": UnsupportedError,
++                "tsql": "WITH t AS (SELECT 'a.b.c' AS value, 1 AS idx) SELECT SPLIT_PART(value, '.', idx) FROM t",
+             },
+         )
+ 
++        self.assertEqual(
++            "SELECT SPLIT_PART(a, ',', 2)",
++            self.parse_one("SELECT SPLIT_PART(a, ',', 2)").sql("tsql"),
++        )
++        with self.assertRaises(UnsupportedError):
++            self.parse_one("SELECT SPLIT_PART(a, ',', 2)").sql(
++                "tsql", unsupported_level=ErrorLevel.RAISE
++            )
++
+     def test_next_value_for(self):
+         self.validate_identity(
+             "SELECT NEXT VALUE FOR db.schema.sequence_name OVER (ORDER BY foo), col"

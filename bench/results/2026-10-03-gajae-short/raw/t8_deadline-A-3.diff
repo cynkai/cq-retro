@@ -1,0 +1,85 @@
+diff --git a/packages/utils/changelog.d/cleanup-deadline-timer-ceiling.md b/packages/utils/changelog.d/cleanup-deadline-timer-ceiling.md
+new file mode 100644
+index 0000000..7c304a2
+--- /dev/null
++++ b/packages/utils/changelog.d/cleanup-deadline-timer-ceiling.md
+@@ -0,0 +1,3 @@
++### Fixed
++
++- Clamp oversized `GJC_CLEANUP_DEADLINE_MS` values to the maximum timer delay so shutdown cleanup is not cut off after 1 ms.
+diff --git a/packages/utils/src/postmortem.ts b/packages/utils/src/postmortem.ts
+index 1d22f6b..f926450 100644
+--- a/packages/utils/src/postmortem.ts
++++ b/packages/utils/src/postmortem.ts
+@@ -131,13 +131,14 @@ function runCleanup(reason: Reason, options: CleanupOptions = {}): Promise<void>
+  * the default).
+  */
+ const DEFAULT_CLEANUP_DEADLINE_MS = 5_000;
++const MAX_TIMEOUT_DELAY_MS = 2 ** 31 - 1;
+ 
+ function resolveCleanupDeadlineMs(): number {
+ 	const raw = process.env.GJC_CLEANUP_DEADLINE_MS;
+ 	if (raw === undefined || raw.trim() === "") return DEFAULT_CLEANUP_DEADLINE_MS;
+ 	const parsed = Number(raw);
+ 	if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_CLEANUP_DEADLINE_MS;
+-	return parsed;
++	return Math.min(parsed, MAX_TIMEOUT_DELAY_MS);
+ }
+ 
+ async function awaitCleanupWithDeadline(reason: Reason, options: CleanupOptions = {}): Promise<void> {
+diff --git a/packages/utils/test/postmortem-fixture.ts b/packages/utils/test/postmortem-fixture.ts
+index 5e57a6a..62e1314 100644
+--- a/packages/utils/test/postmortem-fixture.ts
++++ b/packages/utils/test/postmortem-fixture.ts
+@@ -324,6 +324,22 @@ async function runCleanupDeadlineSignal(): Promise<void> {
+ 	await Bun.sleep(10_000);
+ }
+ 
++async function runCleanupDeadlineClamped(): Promise<void> {
++	process.env.GJC_CLEANUP_DEADLINE_MS = String(2 ** 31);
++	const realSetTimeout = globalThis.setTimeout;
++	globalThis.setTimeout = ((...arguments_: Parameters<typeof setTimeout>) => {
++		const [handler, timeout, ...rest] = arguments_;
++		return realSetTimeout(handler, timeout === 2 ** 31 - 1 ? 0 : timeout, ...rest);
++	}) as typeof setTimeout;
++	postmortem.register("fixture-deadline-clamped", async () => {
++		writeResult({ started: true });
++		await new Promise(() => {});
++	});
++
++	process.kill(process.pid, "SIGTERM");
++	await Bun.sleep(10_000);
++}
++
+ async function runCleanupDeadlineQuit(): Promise<void> {
+ 	process.env.GJC_CLEANUP_DEADLINE_MS = "300";
+ 	postmortem.register("fixture-deadline-quit", async () => {
+@@ -365,6 +381,9 @@ switch (scenario) {
+ 	case "cleanup-deadline-signal":
+ 		await runCleanupDeadlineSignal();
+ 		break;
++	case "cleanup-deadline-clamped":
++		await runCleanupDeadlineClamped();
++		break;
+ 	case "cleanup-deadline-quit":
+ 		await runCleanupDeadlineQuit();
+ 		break;
+diff --git a/packages/utils/test/postmortem.test.ts b/packages/utils/test/postmortem.test.ts
+index cf6a88d..8ee0df8 100644
+--- a/packages/utils/test/postmortem.test.ts
++++ b/packages/utils/test/postmortem.test.ts
+@@ -143,6 +143,14 @@ describe("postmortem cleanup deadline contract (issue #2556)", () => {
+ 		expect(result.stderr).toContain("cleanup deadline (300ms) expired for sigterm");
+ 	});
+ 
++	it("clamps an oversized cleanup deadline to the maximum timer delay", async () => {
++		const result = await runScenario("cleanup-deadline-clamped");
++
++		expect(result.exitCode).toBe(143);
++		expect(parseResult(result.stdout).started).toBe(true);
++		expect(result.stderr).toContain("cleanup deadline (2147483647ms) expired for sigterm");
++	});
++
+ 	it("a hung cleanup callback cannot hang quit(); quit's exit code is preserved", async () => {
+ 		const result = await runScenario("cleanup-deadline-quit");
+ 

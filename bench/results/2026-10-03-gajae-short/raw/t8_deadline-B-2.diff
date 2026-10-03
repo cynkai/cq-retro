@@ -1,0 +1,56 @@
+diff --git a/packages/utils/changelog.d/cleanup-deadline-timer-ceiling.md b/packages/utils/changelog.d/cleanup-deadline-timer-ceiling.md
+new file mode 100644
+index 0000000..79e6354
+--- /dev/null
++++ b/packages/utils/changelog.d/cleanup-deadline-timer-ceiling.md
+@@ -0,0 +1,3 @@
++### Fixed
++
++- Cleanup deadlines above `2147483647` ms are now capped at the `setTimeout` maximum instead of firing after 1 ms.
+diff --git a/packages/utils/src/postmortem.ts b/packages/utils/src/postmortem.ts
+index 1d22f6b..8f76b13 100644
+--- a/packages/utils/src/postmortem.ts
++++ b/packages/utils/src/postmortem.ts
+@@ -131,13 +131,17 @@ function runCleanup(reason: Reason, options: CleanupOptions = {}): Promise<void>
+  * the default).
+  */
+ const DEFAULT_CLEANUP_DEADLINE_MS = 5_000;
++// Node-compatible timers coerce larger delays to 1 ms. Keep the shutdown
++// deadline within the signed 32-bit timer range so a large override does not
++// cause cleanup to time out immediately.
++const MAX_TIMER_DELAY_MS = 2_147_483_647;
+ 
+-function resolveCleanupDeadlineMs(): number {
++export function resolveCleanupDeadlineMs(): number {
+ 	const raw = process.env.GJC_CLEANUP_DEADLINE_MS;
+ 	if (raw === undefined || raw.trim() === "") return DEFAULT_CLEANUP_DEADLINE_MS;
+ 	const parsed = Number(raw);
+ 	if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_CLEANUP_DEADLINE_MS;
+-	return parsed;
++	return Math.min(parsed, MAX_TIMER_DELAY_MS);
+ }
+ 
+ async function awaitCleanupWithDeadline(reason: Reason, options: CleanupOptions = {}): Promise<void> {
+diff --git a/packages/utils/test/postmortem-deadline.test.ts b/packages/utils/test/postmortem-deadline.test.ts
+new file mode 100644
+index 0000000..36a7f96
+--- /dev/null
++++ b/packages/utils/test/postmortem-deadline.test.ts
+@@ -0,0 +1,17 @@
++import { afterEach, describe, expect, it } from "bun:test";
++import { resolveCleanupDeadlineMs } from "../src/postmortem";
++
++const originalDeadline = process.env.GJC_CLEANUP_DEADLINE_MS;
++
++afterEach(() => {
++	if (originalDeadline === undefined) delete process.env.GJC_CLEANUP_DEADLINE_MS;
++	else process.env.GJC_CLEANUP_DEADLINE_MS = originalDeadline;
++});
++
++describe("postmortem cleanup deadline", () => {
++	it("clamps values above the setTimeout maximum", () => {
++		process.env.GJC_CLEANUP_DEADLINE_MS = String(2 ** 31);
++
++		expect(resolveCleanupDeadlineMs()).toBe(2_147_483_647);
++	});
++});

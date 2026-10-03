@@ -1,0 +1,7 @@
+Reading additional input from stdin...
+2026-10-02T22:53:21.078471Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /var/folders/c0/t6rbng510kb6qd1zd_ydlvz40000gn/T/cq-ab-2crLwu/t5_splitpart-B-3/tests/dialects/test_tsql.py:
+            "SELECT SPLIT_PART('1,2,3', ',', 1)",
+            {
+                "spark": "SELECT SPLIT_PART('1,2,3', ',', 1)",
+                "databricks": "SELECT SPLIT_PART('1,2,3', ',', 1)",
+            },

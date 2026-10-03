@@ -1,0 +1,161 @@
+diff --git a/packages/ai/changelog.d/stream-watchdog-timeout-clamp.md b/packages/ai/changelog.d/stream-watchdog-timeout-clamp.md
+new file mode 100644
+index 0000000..c517717
+--- /dev/null
++++ b/packages/ai/changelog.d/stream-watchdog-timeout-clamp.md
+@@ -0,0 +1,3 @@
++### Fixed
++
++- Clamp LLM stream first-event and idle watchdog delays to the platform timer maximum.
+diff --git a/packages/ai/src/providers/cursor.ts b/packages/ai/src/providers/cursor.ts
+index 288e3ad..e9e9a8b 100644
+--- a/packages/ai/src/providers/cursor.ts
++++ b/packages/ai/src/providers/cursor.ts
+@@ -31,7 +31,12 @@ import { normalizeSystemPrompts } from "../utils";
+ import { kProviderResolvedToolCall } from "../utils/block-symbols";
+ import { AssistantMessageEventStream } from "../utils/event-stream";
+ import { transportFailureFacts } from "../utils/fallback-transport";
+-import { FirstEventTimeoutError, getStreamFirstEventTimeoutMs, getStreamIdleTimeoutMs } from "../utils/idle-iterator";
++import {
++	FirstEventTimeoutError,
++	getStreamFirstEventTimeoutMs,
++	getStreamIdleTimeoutMs,
++	setTimeoutWithMaxDelay,
++} from "../utils/idle-iterator";
+ import { connectProxiedSocket, getProxyForUrl } from "../utils/proxy";
+ import { formatErrorMessageWithRetryAfter } from "../utils/retry-after";
+ import { flattenToolRootCombinators, toolWireSchema } from "../utils/schema";
+@@ -1486,7 +1491,7 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
+ 				if (transportWatchdogClosed) return;
+ 				clearTransportWatchdog();
+ 				if (timeoutMs === undefined || timeoutMs <= 0) return;
+-				transportWatchdog = setTimeout(() => {
++				transportWatchdog = setTimeoutWithMaxDelay(() => {
+ 					if (transportWatchdogClosed) return;
+ 					const error = errorFactory();
+ 					terminalize(error);
+diff --git a/packages/ai/src/providers/devin-acp.ts b/packages/ai/src/providers/devin-acp.ts
+index 47142db..688873d 100644
+--- a/packages/ai/src/providers/devin-acp.ts
++++ b/packages/ai/src/providers/devin-acp.ts
+@@ -55,7 +55,7 @@ import type {
+ } from "../types";
+ import { kProviderResolvedToolCall, type ProviderResolvedCarrier } from "../utils/block-symbols";
+ import { AssistantMessageEventStream } from "../utils/event-stream";
+-import { getStreamFirstEventTimeoutMs, getStreamIdleTimeoutMs } from "../utils/idle-iterator";
++import { getStreamFirstEventTimeoutMs, getStreamIdleTimeoutMs, setTimeoutWithMaxDelay } from "../utils/idle-iterator";
+ 
+ // ---------------------------------------------------------------------------
+ // Constants
+@@ -797,7 +797,7 @@ class DevinAcpBridge implements ProviderSessionState {
+ 		const arm = (budgetMs: number | undefined, label: string) => {
+ 			if (watchdog !== undefined) clearTimeout(watchdog);
+ 			if (budgetMs === undefined || !Number.isFinite(budgetMs) || budgetMs <= 0) return;
+-			watchdog = setTimeout(() => {
++			watchdog = setTimeoutWithMaxDelay(() => {
+ 				void this.cancelTurn(new Error(`Devin ACP ${label} timed out after ${budgetMs}ms`));
+ 			}, budgetMs);
+ 		};
+diff --git a/packages/ai/src/providers/openai-codex-responses.ts b/packages/ai/src/providers/openai-codex-responses.ts
+index 22fedc3..15747c4 100644
+--- a/packages/ai/src/providers/openai-codex-responses.ts
++++ b/packages/ai/src/providers/openai-codex-responses.ts
+@@ -62,6 +62,7 @@ import {
+ 	getOpenAIStreamIdleTimeoutMs,
+ 	getStreamFirstEventTimeoutMs,
+ 	iterateWithIdleTimeout,
++	setTimeoutWithMaxDelay,
+ } from "../utils/idle-iterator";
+ import { captureUnicodeEscapeEvidence, parseStreamingJson } from "../utils/json-parse";
+ import { resolveRetryBudget } from "../utils/retry-budget";
+@@ -2844,7 +2845,7 @@ class CodexWebSocketConnection {
+ 			}
+ 		}
+ 		if (!settled) {
+-			timeout = setTimeout(() => {
++			timeout = setTimeoutWithMaxDelay(() => {
+ 				socket.close(1000, "connect-timeout");
+ 				if (!settled) {
+ 					settled = true;
+@@ -3023,7 +3024,7 @@ class CodexWebSocketConnection {
+ 			let timedOut = false;
+ 			let timeout: NodeJS.Timeout | undefined;
+ 			if (timeoutMs !== undefined && timeoutMs > 0) {
+-				timeout = setTimeout(() => {
++				timeout = setTimeoutWithMaxDelay(() => {
+ 					timedOut = true;
+ 					const waiterIndex = this.#waiters.indexOf(resolve);
+ 					if (waiterIndex >= 0) {
+diff --git a/packages/ai/src/utils/idle-iterator.ts b/packages/ai/src/utils/idle-iterator.ts
+index 5ba8b4e..7bfbffe 100644
+--- a/packages/ai/src/utils/idle-iterator.ts
++++ b/packages/ai/src/utils/idle-iterator.ts
+@@ -16,6 +16,12 @@ const LM_STUDIO_FIRST_EVENT_TIMEOUT_MS = 300_000;
+ const OLLAMA_CLOUD_FIRST_EVENT_TIMEOUT_MS = 300_000;
+ 
+ const ANTHROPIC_STREAM_IDLE_TIMEOUT_MS = 300_000;
++/** Maximum delay accepted by the platform timer implementation. */
++export const MAX_TIMEOUT_MS = 2 ** 31 - 1;
++
++export function setTimeoutWithMaxDelay(callback: () => void, delayMs: number): NodeJS.Timeout {
++	return setTimeout(callback, Math.min(delayMs, MAX_TIMEOUT_MS));
++}
+ 
+ export function getProviderStreamIdleTimeoutFallbackMs(provider: string): number | undefined {
+ 	if (provider === "anthropic" || provider === "xai" || provider === "grok-build") {
+@@ -211,7 +217,7 @@ clearTimeout(dummyWatchdog);
+  */
+ export function createWatchdog(timeoutMs: number | undefined, onTimeout: () => void): Watchdog {
+ 	if (timeoutMs !== undefined && timeoutMs > 0) {
+-		return setTimeout(onTimeout, timeoutMs);
++		return setTimeoutWithMaxDelay(onTimeout, timeoutMs);
+ 	}
+ 	return undefined;
+ }
+@@ -338,7 +344,7 @@ export async function* iterateWithIdleTimeout<T>(
+ 			if (enforceTimeout) {
+ 				const { promise, resolve } = Promise.withResolvers<{ kind: "timeout" }>();
+ 				resolveTimeout = resolve;
+-				timer = setTimeout(() => resolve({ kind: "timeout" }), activeTimeoutMs);
++				timer = setTimeoutWithMaxDelay(() => resolve({ kind: "timeout" }), activeTimeoutMs!);
+ 				racers.push(promise);
+ 			}
+ 
+diff --git a/packages/ai/test/stream-timeout-defaults.test.ts b/packages/ai/test/stream-timeout-defaults.test.ts
+index d0e540d..ad634e9 100644
+--- a/packages/ai/test/stream-timeout-defaults.test.ts
++++ b/packages/ai/test/stream-timeout-defaults.test.ts
+@@ -1,12 +1,14 @@
+-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
++import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+ import {
+ 	getOpenAIStreamIdleTimeoutMs,
+ 	getProviderFirstEventTimeoutFallbackMs,
+ 	getProviderStreamIdleTimeoutFallbackMs,
+ 	getStreamFirstEventTimeoutMs,
+ 	getStreamIdleTimeoutMs,
++	MAX_TIMEOUT_MS,
+ 	resolveAnthropicSdkRequestTimeoutMs,
+ 	resolveOpenAISdkRequestTimeoutMs,
++	setTimeoutWithMaxDelay,
+ } from "../src/utils/idle-iterator";
+ 
+ /**
+@@ -27,6 +29,17 @@ const ENV_KEYS = [
+ 
+ const originalEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
+ 
++describe("stream watchdog timer limits", () => {
++	it("caps delays at the platform setTimeout maximum", () => {
++		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
++		const timer = setTimeoutWithMaxDelay(() => {}, MAX_TIMEOUT_MS + 1);
++
++		expect(setTimeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), MAX_TIMEOUT_MS);
++		clearTimeout(timer);
++		setTimeoutSpy.mockRestore();
++	});
++});
++
+ beforeEach(() => {
+ 	for (const key of ENV_KEYS) {
+ 		originalEnv[key] = Bun.env[key];

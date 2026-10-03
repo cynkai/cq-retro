@@ -1,0 +1,13 @@
+diff --git a/sqlglot/dialects/tsql.py b/sqlglot/dialects/tsql.py
+index 1298dca..2081853 100644
+--- a/sqlglot/dialects/tsql.py
++++ b/sqlglot/dialects/tsql.py
+@@ -1139,7 +1139,7 @@ class TSQL(Dialect):
+                 self.unsupported(
+                     "SPLIT_PART can be transpiled to PARSENAME only for '.' delimiter and literal values"
+                 )
+-                return ""
++                return self.func("SPLIT_PART", this, delimiter, part_index)
+ 
+             return self.func(
+                 "PARSENAME", this, exp.Literal.number(split_count + 1 - part_index.to_py())

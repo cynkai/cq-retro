@@ -1,0 +1,73 @@
+diff --git a/packages/ai/changelog.d/stream-watchdog-timeout-cap.md b/packages/ai/changelog.d/stream-watchdog-timeout-cap.md
+new file mode 100644
+index 0000000..5e92324
+--- /dev/null
++++ b/packages/ai/changelog.d/stream-watchdog-timeout-cap.md
+@@ -0,0 +1,3 @@
++### Fixed
++
++- Cap stream idle and first-event watchdog delays at the maximum supported by `setTimeout`.
+diff --git a/packages/ai/src/utils/idle-iterator.ts b/packages/ai/src/utils/idle-iterator.ts
+index 5ba8b4e..48f0c26 100644
+--- a/packages/ai/src/utils/idle-iterator.ts
++++ b/packages/ai/src/utils/idle-iterator.ts
+@@ -16,6 +16,12 @@ const LM_STUDIO_FIRST_EVENT_TIMEOUT_MS = 300_000;
+ const OLLAMA_CLOUD_FIRST_EVENT_TIMEOUT_MS = 300_000;
+ 
+ const ANTHROPIC_STREAM_IDLE_TIMEOUT_MS = 300_000;
++/** Maximum delay accepted by setTimeout before runtimes wrap it to 1 ms. */
++export const MAX_SET_TIMEOUT_DELAY_MS = 2_147_483_647;
++
++export function clampSetTimeoutDelayMs(delayMs: number): number {
++	return Math.min(delayMs, MAX_SET_TIMEOUT_DELAY_MS);
++}
+ 
+ export function getProviderStreamIdleTimeoutFallbackMs(provider: string): number | undefined {
+ 	if (provider === "anthropic" || provider === "xai" || provider === "grok-build") {
+@@ -211,7 +217,7 @@ clearTimeout(dummyWatchdog);
+  */
+ export function createWatchdog(timeoutMs: number | undefined, onTimeout: () => void): Watchdog {
+ 	if (timeoutMs !== undefined && timeoutMs > 0) {
+-		return setTimeout(onTimeout, timeoutMs);
++		return setTimeout(onTimeout, clampSetTimeoutDelayMs(timeoutMs));
+ 	}
+ 	return undefined;
+ }
+@@ -338,7 +344,7 @@ export async function* iterateWithIdleTimeout<T>(
+ 			if (enforceTimeout) {
+ 				const { promise, resolve } = Promise.withResolvers<{ kind: "timeout" }>();
+ 				resolveTimeout = resolve;
+-				timer = setTimeout(() => resolve({ kind: "timeout" }), activeTimeoutMs);
++				timer = setTimeout(() => resolve({ kind: "timeout" }), clampSetTimeoutDelayMs(activeTimeoutMs!));
+ 				racers.push(promise);
+ 			}
+ 
+diff --git a/packages/ai/test/stream-timeout-defaults.test.ts b/packages/ai/test/stream-timeout-defaults.test.ts
+index d0e540d..cf87751 100644
+--- a/packages/ai/test/stream-timeout-defaults.test.ts
++++ b/packages/ai/test/stream-timeout-defaults.test.ts
+@@ -1,10 +1,12 @@
+ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+ import {
++	clampSetTimeoutDelayMs,
+ 	getOpenAIStreamIdleTimeoutMs,
+ 	getProviderFirstEventTimeoutFallbackMs,
+ 	getProviderStreamIdleTimeoutFallbackMs,
+ 	getStreamFirstEventTimeoutMs,
+ 	getStreamIdleTimeoutMs,
++	MAX_SET_TIMEOUT_DELAY_MS,
+ 	resolveAnthropicSdkRequestTimeoutMs,
+ 	resolveOpenAISdkRequestTimeoutMs,
+ } from "../src/utils/idle-iterator";
+@@ -46,6 +48,11 @@ afterEach(() => {
+ });
+ 
+ describe("getProviderStreamIdleTimeoutFallbackMs(provider)", () => {
++	it("caps delays at the maximum supported by setTimeout", () => {
++		expect(clampSetTimeoutDelayMs(MAX_SET_TIMEOUT_DELAY_MS + 1)).toBe(MAX_SET_TIMEOUT_DELAY_MS);
++		expect(clampSetTimeoutDelayMs(120_000)).toBe(120_000);
++	});
++
+ 	it("gives Anthropic a 300-second idle window for long reasoning gaps", () => {
+ 		expect(getProviderStreamIdleTimeoutFallbackMs("anthropic")).toBe(300_000);
+ 	});

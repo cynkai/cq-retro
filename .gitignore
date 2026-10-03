@@ -1,0 +1,10 @@
+.cq/
+.cq*/
+.DS_Store
+.omo/
+HANDOFF_BUILD_WEEK.md
+.cq_demo/
+node_modules/
+__pycache__/
+bench/.targets/
+bench/.tools/

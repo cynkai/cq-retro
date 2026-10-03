@@ -1,0 +1,28 @@
+{
+  "repo": { "git": "https://github.com/tobymao/sqlglot.git", "ref": "v27.0.0" },
+  "agents": "agents/cq.md",
+  "model": "gpt-5.6-luna",
+  "effort": "low",
+  "gate": { "metric": "total_plus_output", "min_token_reduction": 0.2, "min_cq_call_rate": 0.7 },
+  "tasks": [
+    {
+      "id": "t3_cbrt",
+      "prompt": "Transpiling CBRT(x) to T-SQL currently emits CBRT(x), which T-SQL does not have. Make the T-SQL output POWER(x, 1.0 / 3) instead (any exponent expression equal to one third is fine). Other dialects must not change.",
+      "check": "checks/sqlglot/t3_cbrt.py"
+    },
+    {
+      "id": "t4_bitcount",
+      "prompt": "Add first-class support for the BIT_COUNT function: BIT_COUNT(x) should parse into a dedicated expression class named BitCount in every dialect instead of an anonymous function. ClickHouse spells it bitCount, so parsing bitCount(x) in ClickHouse must also produce BitCount, and generating ClickHouse SQL must emit bitCount(x). Other dialects emit BIT_COUNT(x).",
+      "check": "checks/sqlglot/t4_bitcount.py"
+    },
+    {
+      "id": "t5_splitpart",
+      "prompt": "Transpiling SELECT SPLIT_PART(a, ',', 2) from Postgres to T-SQL silently produces just SELECT, dropping the expression. When the PARSENAME rewrite does not apply, keep the call as SPLIT_PART(a, ',', 2) instead. Keep the existing unsupported warning so that strict error levels still raise, and keep the PARSENAME rewrite where it already works.",
+      "check": "checks/sqlglot/t5_splitpart.py"
+    }
+  ],
+  "limits": [
+    "One repository (sqlglot v27.0.0), well known to the model; prompts name behaviour, not files or symbols.",
+    "No control task."
+  ]
+}

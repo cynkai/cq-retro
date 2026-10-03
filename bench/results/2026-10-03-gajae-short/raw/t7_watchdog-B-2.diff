@@ -1,0 +1,88 @@
+diff --git a/packages/ai/changelog.d/stream-watchdog-timeout-limit.md b/packages/ai/changelog.d/stream-watchdog-timeout-limit.md
+new file mode 100644
+index 0000000..50064b0
+--- /dev/null
++++ b/packages/ai/changelog.d/stream-watchdog-timeout-limit.md
+@@ -0,0 +1,3 @@
++### Fixed
++
++- Cap stream idle and first-event watchdog delays at the maximum delay supported by `setTimeout`, preventing very large timeout values from firing immediately.
+diff --git a/packages/ai/src/utils/idle-iterator.ts b/packages/ai/src/utils/idle-iterator.ts
+index 5ba8b4e..ea04971 100644
+--- a/packages/ai/src/utils/idle-iterator.ts
++++ b/packages/ai/src/utils/idle-iterator.ts
+@@ -16,6 +16,7 @@ const LM_STUDIO_FIRST_EVENT_TIMEOUT_MS = 300_000;
+ const OLLAMA_CLOUD_FIRST_EVENT_TIMEOUT_MS = 300_000;
+ 
+ const ANTHROPIC_STREAM_IDLE_TIMEOUT_MS = 300_000;
++const MAX_SET_TIMEOUT_DELAY_MS = 2_147_483_647;
+ 
+ export function getProviderStreamIdleTimeoutFallbackMs(provider: string): number | undefined {
+ 	if (provider === "anthropic" || provider === "xai" || provider === "grok-build") {
+@@ -205,13 +206,17 @@ export class FirstEventTimeoutError extends Error {
+ const dummyWatchdog = setTimeout(() => {}, 1);
+ clearTimeout(dummyWatchdog);
+ 
++function setTimeoutDelay(timeoutMs: number): number {
++	return Math.min(timeoutMs, MAX_SET_TIMEOUT_DELAY_MS);
++}
++
+ /**
+  * Starts a watchdog that aborts a request if no first stream event arrives in time.
+  * Call `markFirstEventReceived()` as soon as the first event is observed.
+  */
+ export function createWatchdog(timeoutMs: number | undefined, onTimeout: () => void): Watchdog {
+ 	if (timeoutMs !== undefined && timeoutMs > 0) {
+-		return setTimeout(onTimeout, timeoutMs);
++		return setTimeout(onTimeout, setTimeoutDelay(timeoutMs));
+ 	}
+ 	return undefined;
+ }
+@@ -338,7 +343,7 @@ export async function* iterateWithIdleTimeout<T>(
+ 			if (enforceTimeout) {
+ 				const { promise, resolve } = Promise.withResolvers<{ kind: "timeout" }>();
+ 				resolveTimeout = resolve;
+-				timer = setTimeout(() => resolve({ kind: "timeout" }), activeTimeoutMs);
++				timer = setTimeout(() => resolve({ kind: "timeout" }), setTimeoutDelay(activeTimeoutMs!));
+ 				racers.push(promise);
+ 			}
+ 
+diff --git a/packages/ai/test/idle-iterator.test.ts b/packages/ai/test/idle-iterator.test.ts
+index 80f7471..05be8d5 100644
+--- a/packages/ai/test/idle-iterator.test.ts
++++ b/packages/ai/test/idle-iterator.test.ts
+@@ -1,6 +1,6 @@
+ import { afterEach, describe, expect, it, vi } from "bun:test";
+ import { STREAM_FIRST_EVENT_TIMEOUT_PROVIDER_CODE, transportFailureFacts } from "../src/utils/fallback-transport";
+-import { FirstEventTimeoutError, iterateWithIdleTimeout } from "../src/utils/idle-iterator";
++import { createWatchdog, FirstEventTimeoutError, iterateWithIdleTimeout } from "../src/utils/idle-iterator";
+ 
+ async function waitForTimerRegistration(): Promise<void> {
+ 	await Promise.resolve();
+@@ -13,6 +13,26 @@ describe("iterateWithIdleTimeout transport facts", () => {
+ 		vi.restoreAllMocks();
+ 	});
+ 
++	it("caps very large first-event and idle watchdog delays for setTimeout", async () => {
++		vi.useFakeTimers();
++		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
++		const hugeTimeout = 2_147_483_648;
++		const watchdog = createWatchdog(hugeTimeout, () => {});
++		const source = (async function* () {
++			await new Promise<never>(() => {});
++		})();
++		const pending = iterateWithIdleTimeout(source, {
++			firstItemTimeoutMs: hugeTimeout,
++			idleTimeoutMs: hugeTimeout,
++			errorMessage: "stream idle",
++		}).next();
++		await waitForTimerRegistration();
++
++		expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 2_147_483_647);
++		clearTimeout(watchdog);
++		void pending;
++	});
++
+ 	it("normalizes the typed first-event timeout fact idempotently", () => {
+ 		const error = new FirstEventTimeoutError("first event timed out");
+ 		const facts = transportFailureFacts(error);

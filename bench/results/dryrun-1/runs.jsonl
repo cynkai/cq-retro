@@ -1,0 +1,2 @@
+{"run":"t1_cvss-A-1","task":"t1_cvss","arm":"A","rep":1,"exit":0,"seconds":19,"input_tokens":92518,"cached_input_tokens":77956,"output_tokens":1196,"reasoning_output_tokens":105,"uncached_plus_output":15758,"turns":1,"commands":5,"cq_calls":0,"success":true,"check_output":"OK"}
+{"run":"t1_cvss-B-1","task":"t1_cvss","arm":"B","rep":1,"exit":0,"seconds":20,"input_tokens":88151,"cached_input_tokens":74109,"output_tokens":1409,"reasoning_output_tokens":59,"uncached_plus_output":15451,"turns":1,"commands":5,"cq_calls":2,"success":true,"check_output":"OK"}

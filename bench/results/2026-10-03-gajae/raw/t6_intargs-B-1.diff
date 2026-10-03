@@ -1,0 +1,93 @@
+diff --git a/packages/coding-agent/src/coordinator-mcp/server.ts b/packages/coding-agent/src/coordinator-mcp/server.ts
+index 560d8a3..6315f95 100644
+--- a/packages/coding-agent/src/coordinator-mcp/server.ts
++++ b/packages/coding-agent/src/coordinator-mcp/server.ts
+@@ -2620,9 +2620,15 @@ export async function appendCoordinatorEventForTest(
+ 	return appendCoordinatorEvent(namespaceDir, input);
+ }
+ 
++export function parseCoordinatorNumericArgument(value: unknown): number | undefined {
++	if (typeof value === "number") return value;
++	if (typeof value !== "string" || !/^\d+$/.test(value.trim())) return undefined;
++	return Number(value.trim());
++}
++
+ function boundedEventLimit(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+-	if (!Number.isFinite(parsed) || parsed <= 0) return 100;
++	const parsed = parseCoordinatorNumericArgument(value);
++	if (parsed === undefined || !Number.isFinite(parsed) || parsed <= 0) return 100;
+ 	return Math.min(parsed, 100);
+ }
+ 
+@@ -3190,8 +3196,8 @@ export const COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS = 30_000;
+ export const COORDINATOR_POLL_INTERVAL_MAX_MS = 10_000;
+ 
+ function parsePositiveIntegerMs(value: unknown, fallback: number): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+-	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
++	const parsed = parseCoordinatorNumericArgument(value);
++	return parsed !== undefined && Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+ }
+ 
+ export function boundedAwaitTurnTimeoutMs(value: unknown): number {
+@@ -3206,9 +3212,9 @@ export function boundedRuntimePromptAckTimeoutMs(value: unknown): number {
+ }
+ 
+ export function boundedEventWatchTimeoutMs(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = parseCoordinatorNumericArgument(value);
+ 	if (parsed === 0) return 0;
+-	return Math.min(Number.isFinite(parsed) && parsed > 0 ? parsed : 1000, COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS);
++	return Math.min(parsed !== undefined && Number.isFinite(parsed) && parsed > 0 ? parsed : 1000, COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS);
+ }
+ 
+ export function boundedPollIntervalMs(value: unknown): number {
+@@ -3216,8 +3222,8 @@ export function boundedPollIntervalMs(value: unknown): number {
+ }
+ 
+ function boundedLineCount(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+-	if (!Number.isFinite(parsed) || parsed <= 0) return 80;
++	const parsed = parseCoordinatorNumericArgument(value);
++	if (parsed === undefined || !Number.isFinite(parsed) || parsed <= 0) return 80;
+ 	return Math.min(parsed, 400);
+ }
+ 
+diff --git a/packages/coding-agent/test/coordinator-mcp-numeric-args.test.ts b/packages/coding-agent/test/coordinator-mcp-numeric-args.test.ts
+new file mode 100644
+index 0000000..82ac97e
+--- /dev/null
++++ b/packages/coding-agent/test/coordinator-mcp-numeric-args.test.ts
+@@ -0,0 +1,31 @@
++import { describe, expect, it } from "bun:test";
++import {
++	boundedAwaitTurnTimeoutMs,
++	boundedEventWatchTimeoutMs,
++	boundedPollIntervalMs,
++	parseCoordinatorNumericArgument,
++} from "../src/coordinator-mcp/server";
++
++describe("coordinator MCP numeric arguments", () => {
++	it("accepts numbers and trimmed plain decimal strings", () => {
++		expect(parseCoordinatorNumericArgument(1.5)).toBe(1.5);
++		expect(parseCoordinatorNumericArgument(" 10000 ")).toBe(10000);
++		expect(parseCoordinatorNumericArgument("1e4")).toBeUndefined();
++		expect(parseCoordinatorNumericArgument("5s")).toBeUndefined();
++		expect(parseCoordinatorNumericArgument("1.5")).toBeUndefined();
++		expect(parseCoordinatorNumericArgument([50])).toBeUndefined();
++	});
++
++	it("uses each timeout and poll interval default for malformed values", () => {
++		for (const value of ["1e4", "5s", "1.5", [50]]) {
++			expect(boundedAwaitTurnTimeoutMs(value)).toBe(1000);
++			expect(boundedEventWatchTimeoutMs(value)).toBe(1000);
++			expect(boundedPollIntervalMs(value)).toBe(100);
++		}
++	});
++
++	it("preserves the explicit zero event-watch timeout", () => {
++		expect(boundedEventWatchTimeoutMs(" 0 ")).toBe(0);
++		expect(boundedEventWatchTimeoutMs(0)).toBe(0);
++	});
++});

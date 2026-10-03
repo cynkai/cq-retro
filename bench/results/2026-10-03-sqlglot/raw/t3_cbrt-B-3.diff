@@ -1,0 +1,26 @@
+diff --git a/sqlglot/dialects/tsql.py b/sqlglot/dialects/tsql.py
+index 1298dca..f664028 100644
+--- a/sqlglot/dialects/tsql.py
++++ b/sqlglot/dialects/tsql.py
+@@ -1016,6 +1016,9 @@ class TSQL(Dialect):
+             exp.ArrayToString: rename_func("STRING_AGG"),
+             exp.AutoIncrementColumnConstraint: lambda *_: "IDENTITY",
+             exp.Chr: rename_func("CHAR"),
++            exp.Cbrt: lambda self, e: self.func(
++                "POWER", e.this, exp.Div(this=exp.Literal.number("1.0"), expression=exp.Literal.number(3))
++            ),
+             exp.DateAdd: date_delta_sql("DATEADD"),
+             exp.DateDiff: date_delta_sql("DATEDIFF"),
+             exp.CTE: transforms.preprocess([qualify_derived_table_outputs]),
+diff --git a/tests/dialects/test_tsql.py b/tests/dialects/test_tsql.py
+index c9dca79..fe8023b 100644
+--- a/tests/dialects/test_tsql.py
++++ b/tests/dialects/test_tsql.py
+@@ -18,6 +18,7 @@ class TestTSQL(Validator):
+         self.validate_identity("SELECT * FROM a..b")
+ 
+         self.validate_identity("SELECT SYSDATETIMEOFFSET()")
++        self.validate_identity("CBRT(x)", "POWER(x, CAST(1.0 AS FLOAT) / 3)")
+         self.validate_identity("GO").assert_is(exp.Command)
+         self.validate_identity("SELECT go").selects[0].assert_is(exp.Column)
+         self.validate_identity("CREATE view a.b.c", "CREATE VIEW b.c")

@@ -1,0 +1,38 @@
+diff --git a/sqlglot/dialects/tsql.py b/sqlglot/dialects/tsql.py
+index 1298dca..2081853 100644
+--- a/sqlglot/dialects/tsql.py
++++ b/sqlglot/dialects/tsql.py
+@@ -1139,7 +1139,7 @@ class TSQL(Dialect):
+                 self.unsupported(
+                     "SPLIT_PART can be transpiled to PARSENAME only for '.' delimiter and literal values"
+                 )
+-                return ""
++                return self.func("SPLIT_PART", this, delimiter, part_index)
+ 
+             return self.func(
+                 "PARSENAME", this, exp.Literal.number(split_count + 1 - part_index.to_py())
+diff --git a/tests/dialects/test_tsql.py b/tests/dialects/test_tsql.py
+index c9dca79..1d2f586 100644
+--- a/tests/dialects/test_tsql.py
++++ b/tests/dialects/test_tsql.py
+@@ -1,4 +1,4 @@
+-from sqlglot import exp, parse, parse_one
++from sqlglot import ErrorLevel, exp, parse, parse_one
+ from sqlglot.errors import ParseError, UnsupportedError
+ from sqlglot.optimizer.annotate_types import annotate_types
+ from tests.dialects.test_dialect import Validator
+@@ -2296,6 +2296,14 @@ FROM OPENJSON(@json) WITH (
+             },
+         )
+ 
++        expression = parse_one("SELECT SPLIT_PART(a, ',', 2)", read="postgres")
++        self.assertEqual(
++            expression.sql("tsql", unsupported_level=ErrorLevel.IGNORE),
++            "SELECT SPLIT_PART(a, ',', 2)",
++        )
++        with self.assertRaises(UnsupportedError):
++            expression.sql("tsql", unsupported_level=ErrorLevel.RAISE)
++
+     def test_next_value_for(self):
+         self.validate_identity(
+             "SELECT NEXT VALUE FOR db.schema.sequence_name OVER (ORDER BY foo), col"

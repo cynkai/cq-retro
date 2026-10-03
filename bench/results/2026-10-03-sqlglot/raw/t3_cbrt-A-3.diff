@@ -1,0 +1,32 @@
+diff --git a/sqlglot/dialects/tsql.py b/sqlglot/dialects/tsql.py
+index 1298dca..ba9f616 100644
+--- a/sqlglot/dialects/tsql.py
++++ b/sqlglot/dialects/tsql.py
+@@ -1016,6 +1016,11 @@ class TSQL(Dialect):
+             exp.ArrayToString: rename_func("STRING_AGG"),
+             exp.AutoIncrementColumnConstraint: lambda *_: "IDENTITY",
+             exp.Chr: rename_func("CHAR"),
++            exp.Cbrt: lambda self, e: self.func(
++                "POWER",
++                e.this,
++                exp.Div(this=exp.Literal.number("1.0"), expression=exp.Literal.number("3")),
++            ),
+             exp.DateAdd: date_delta_sql("DATEADD"),
+             exp.DateDiff: date_delta_sql("DATEDIFF"),
+             exp.CTE: transforms.preprocess([qualify_derived_table_outputs]),
+diff --git a/tests/dialects/test_tsql.py b/tests/dialects/test_tsql.py
+index c9dca79..dedf643 100644
+--- a/tests/dialects/test_tsql.py
++++ b/tests/dialects/test_tsql.py
+@@ -8,6 +8,11 @@ class TestTSQL(Validator):
+     dialect = "tsql"
+ 
+     def test_tsql(self):
++        self.assertEqual(
++            parse_one("CBRT(x)").sql(dialect="tsql"), "POWER(x, CAST(1.0 AS FLOAT) / 3)"
++        )
++        self.assertEqual(parse_one("CBRT(x)").sql(dialect="postgres"), "CBRT(x)")
++
+         self.validate_identity(
+             "with x as (select 1) select * from x union select * from x order by 1 limit 0",
+             "WITH x AS (SELECT 1 AS [1]) SELECT TOP 0 * FROM (SELECT * FROM x UNION SELECT * FROM x) AS _l_0 ORDER BY 1",

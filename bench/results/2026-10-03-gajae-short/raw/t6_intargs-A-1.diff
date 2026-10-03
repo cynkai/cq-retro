@@ -1,0 +1,102 @@
+diff --git a/packages/coding-agent/changelog.d/coordinator-strict-numeric-arguments.md b/packages/coding-agent/changelog.d/coordinator-strict-numeric-arguments.md
+new file mode 100644
+index 0000000..de1f05e
+--- /dev/null
++++ b/packages/coding-agent/changelog.d/coordinator-strict-numeric-arguments.md
+@@ -0,0 +1,3 @@
++### Fixed
++
++- Coordinator MCP timeout, poll interval, line-count, and event-limit arguments now fall back to their defaults when given malformed numeric values.
+diff --git a/packages/coding-agent/src/coordinator-mcp/server.ts b/packages/coding-agent/src/coordinator-mcp/server.ts
+index 560d8a3..9a7ada3 100644
+--- a/packages/coding-agent/src/coordinator-mcp/server.ts
++++ b/packages/coding-agent/src/coordinator-mcp/server.ts
+@@ -2621,8 +2621,8 @@ export async function appendCoordinatorEventForTest(
+ }
+ 
+ function boundedEventLimit(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+-	if (!Number.isFinite(parsed) || parsed <= 0) return 100;
++	const parsed = parseCoordinatorNumericArgument(value);
++	if (parsed === undefined || parsed <= 0) return 100;
+ 	return Math.min(parsed, 100);
+ }
+ 
+@@ -3189,9 +3189,19 @@ export const COORDINATOR_RUNTIME_PROMPT_ACK_TIMEOUT_MAX_MS = MAX_RUNTIME_PROMPT_
+ export const COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS = 30_000;
+ export const COORDINATOR_POLL_INTERVAL_MAX_MS = 10_000;
+ 
++/** Accept numeric tool arguments or complete decimal digit strings only. */
++export function parseCoordinatorNumericArgument(value: unknown): number | undefined {
++	if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
++	if (typeof value !== "string") return undefined;
++	const trimmed = value.trim();
++	if (!/^\d+$/.test(trimmed)) return undefined;
++	const parsed = Number.parseInt(trimmed, 10);
++	return Number.isFinite(parsed) ? parsed : undefined;
++}
++
+ function parsePositiveIntegerMs(value: unknown, fallback: number): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+-	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
++	const parsed = parseCoordinatorNumericArgument(value);
++	return parsed !== undefined && parsed > 0 ? parsed : fallback;
+ }
+ 
+ export function boundedAwaitTurnTimeoutMs(value: unknown): number {
+@@ -3206,9 +3216,9 @@ export function boundedRuntimePromptAckTimeoutMs(value: unknown): number {
+ }
+ 
+ export function boundedEventWatchTimeoutMs(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = parseCoordinatorNumericArgument(value);
+ 	if (parsed === 0) return 0;
+-	return Math.min(Number.isFinite(parsed) && parsed > 0 ? parsed : 1000, COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS);
++	return Math.min(parsed !== undefined && parsed > 0 ? parsed : 1000, COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS);
+ }
+ 
+ export function boundedPollIntervalMs(value: unknown): number {
+@@ -3216,8 +3226,8 @@ export function boundedPollIntervalMs(value: unknown): number {
+ }
+ 
+ function boundedLineCount(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+-	if (!Number.isFinite(parsed) || parsed <= 0) return 80;
++	const parsed = parseCoordinatorNumericArgument(value);
++	if (parsed === undefined || parsed <= 0) return 80;
+ 	return Math.min(parsed, 400);
+ }
+ 
+diff --git a/packages/coding-agent/test/coordinator-mcp-server.test.ts b/packages/coding-agent/test/coordinator-mcp-server.test.ts
+index 736ca9e..16db0ec 100644
+--- a/packages/coding-agent/test/coordinator-mcp-server.test.ts
++++ b/packages/coding-agent/test/coordinator-mcp-server.test.ts
+@@ -40,6 +40,7 @@ import {
+ 	awaitEventWebhookDeliveriesForTest,
+ 	type CoordinatorMcpServer,
+ 	createCoordinatorMcpServer,
++	parseCoordinatorNumericArgument,
+ 	readCoordinatorArtifact,
+ } from "../src/coordinator-mcp/server";
+ import { MAX_REAP_FAILURES } from "../src/coordinator-mcp/session-reaper";
+@@ -187,6 +188,20 @@ afterEach(async () => {
+ 	await Promise.all(tempDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
+ });
+ 
++describe("coordinator numeric tool arguments", () => {
++	it("accepts numbers and complete decimal digit strings", () => {
++		expect(parseCoordinatorNumericArgument(50)).toBe(50);
++		expect(parseCoordinatorNumericArgument(" 50 ")).toBe(50);
++		expect(parseCoordinatorNumericArgument("0")).toBe(0);
++	});
++
++	it("rejects prefixes, decimals, exponents, and non-scalars", () => {
++		for (const value of ["1e4", "5s", "1.5", [50], { value: 50 }, null, undefined]) {
++			expect(parseCoordinatorNumericArgument(value)).toBeUndefined();
++		}
++	});
++});
++
+ type SdkControl = { operation: string; input: Record<string, unknown>; idempotencyKey?: string };
+ 
+ type SdkControlServerOptions = {

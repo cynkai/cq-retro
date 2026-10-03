@@ -1,0 +1,103 @@
+diff --git a/packages/coding-agent/src/coordinator-mcp/server.ts b/packages/coding-agent/src/coordinator-mcp/server.ts
+index 560d8a3..466bb05 100644
+--- a/packages/coding-agent/src/coordinator-mcp/server.ts
++++ b/packages/coding-agent/src/coordinator-mcp/server.ts
+@@ -2620,9 +2620,16 @@ export async function appendCoordinatorEventForTest(
+ 	return appendCoordinatorEvent(namespaceDir, input);
+ }
+ 
++function parseIntegerArgument(value: unknown): number | null {
++	if (typeof value === "number") return Number.isFinite(value) ? value : null;
++	if (typeof value !== "string" || !/^\s*\d+\s*$/.test(value)) return null;
++	const parsed = Number(value);
++	return Number.isFinite(parsed) ? parsed : null;
++}
++
+ function boundedEventLimit(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+-	if (!Number.isFinite(parsed) || parsed <= 0) return 100;
++	const parsed = parseIntegerArgument(value);
++	if (parsed === null || parsed <= 0) return 100;
+ 	return Math.min(parsed, 100);
+ }
+ 
+@@ -3190,8 +3197,8 @@ export const COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS = 30_000;
+ export const COORDINATOR_POLL_INTERVAL_MAX_MS = 10_000;
+ 
+ function parsePositiveIntegerMs(value: unknown, fallback: number): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+-	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
++	const parsed = parseIntegerArgument(value);
++	return parsed !== null && parsed > 0 ? parsed : fallback;
+ }
+ 
+ export function boundedAwaitTurnTimeoutMs(value: unknown): number {
+@@ -3206,9 +3213,9 @@ export function boundedRuntimePromptAckTimeoutMs(value: unknown): number {
+ }
+ 
+ export function boundedEventWatchTimeoutMs(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = parseIntegerArgument(value);
+ 	if (parsed === 0) return 0;
+-	return Math.min(Number.isFinite(parsed) && parsed > 0 ? parsed : 1000, COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS);
++	return Math.min(parsed !== null && parsed > 0 ? parsed : 1000, COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS);
+ }
+ 
+ export function boundedPollIntervalMs(value: unknown): number {
+@@ -3216,8 +3223,8 @@ export function boundedPollIntervalMs(value: unknown): number {
+ }
+ 
+ function boundedLineCount(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+-	if (!Number.isFinite(parsed) || parsed <= 0) return 80;
++	const parsed = parseIntegerArgument(value);
++	if (parsed === null || parsed <= 0) return 80;
+ 	return Math.min(parsed, 400);
+ }
+ 
+diff --git a/packages/coding-agent/test/coordinator-mcp-server.test.ts b/packages/coding-agent/test/coordinator-mcp-server.test.ts
+index 736ca9e..87781bb 100644
+--- a/packages/coding-agent/test/coordinator-mcp-server.test.ts
++++ b/packages/coding-agent/test/coordinator-mcp-server.test.ts
+@@ -38,6 +38,9 @@ import {
+ 	appendCoordinatorEventForTest,
+ 	awaitCodexWakePublishesForTest,
+ 	awaitEventWebhookDeliveriesForTest,
++	boundedAwaitTurnTimeoutMs,
++	boundedEventWatchTimeoutMs,
++	boundedPollIntervalMs,
+ 	type CoordinatorMcpServer,
+ 	createCoordinatorMcpServer,
+ 	readCoordinatorArtifact,
+@@ -56,6 +59,7 @@ import {
+ 	GATE_OTHER_OPTION,
+ 	type WorkflowGate,
+ } from "../src/modes/shared/agent-wire/workflow-gate-types";
++
+ import {
+ 	type BrokerDiscovery,
+ 	brokerDiscoveryPath,
+@@ -83,6 +87,23 @@ import {
+ } from "./helpers/fixture-broker-cleanup";
+ import { prepareExactSessionAuthority } from "./helpers/sdk-exact-session-authority";
+ 
++describe("coordinator numeric argument parsing", () => {
++	it("uses defaults for malformed numeric strings and non-string values", () => {
++		for (const value of ["1e4", "5s", "1.5", [50], {}, null, undefined]) {
++			expect(boundedAwaitTurnTimeoutMs(value)).toBe(1000);
++			expect(boundedPollIntervalMs(value)).toBe(100);
++			expect(boundedEventWatchTimeoutMs(value)).toBe(1000);
++		}
++	});
++
++	it("accepts numbers and whitespace-surrounded decimal strings", () => {
++		expect(boundedAwaitTurnTimeoutMs(2500)).toBe(2500);
++		expect(boundedAwaitTurnTimeoutMs(" 2500 ")).toBe(2500);
++		expect(boundedPollIntervalMs(" 250 ")).toBe(250);
++		expect(boundedEventWatchTimeoutMs(" 0 ")).toBe(0);
++	});
++});
++
+ // Coordinator state writes serialize on a lock whose removals go through identity-bound
+ // native primitives; point them at a working implementation.
+ installExactIdentityNatives();

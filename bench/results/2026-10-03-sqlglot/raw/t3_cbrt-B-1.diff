@@ -1,0 +1,29 @@
+diff --git a/sqlglot/dialects/tsql.py b/sqlglot/dialects/tsql.py
+index 1298dca..733dd9a 100644
+--- a/sqlglot/dialects/tsql.py
++++ b/sqlglot/dialects/tsql.py
+@@ -1022,6 +1022,9 @@ class TSQL(Dialect):
+             exp.CurrentDate: rename_func("GETDATE"),
+             exp.CurrentTimestamp: rename_func("GETDATE"),
+             exp.CurrentTimestampLTZ: rename_func("SYSDATETIMEOFFSET"),
++            exp.Cbrt: lambda self, e: self.func(
++                "POWER", e.this, exp.Div(this=exp.Literal.number("1.0"), expression=exp.Literal.number(3))
++            ),
+             exp.DateStrToDate: datestrtodate_sql,
+             exp.Extract: rename_func("DATEPART"),
+             exp.GeneratedAsIdentityColumnConstraint: generatedasidentitycolumnconstraint_sql,
+diff --git a/tests/dialects/test_tsql.py b/tests/dialects/test_tsql.py
+index c9dca79..c339201 100644
+--- a/tests/dialects/test_tsql.py
++++ b/tests/dialects/test_tsql.py
+@@ -18,6 +18,10 @@ class TestTSQL(Validator):
+         self.validate_identity("SELECT * FROM a..b")
+ 
+         self.validate_identity("SELECT SYSDATETIMEOFFSET()")
++        self.validate_all(
++            "SELECT CBRT(x)",
++            write={"tsql": "SELECT POWER(x, CAST(1.0 AS FLOAT) / 3)"},
++        )
+         self.validate_identity("GO").assert_is(exp.Command)
+         self.validate_identity("SELECT go").selects[0].assert_is(exp.Column)
+         self.validate_identity("CREATE view a.b.c", "CREATE VIEW b.c")

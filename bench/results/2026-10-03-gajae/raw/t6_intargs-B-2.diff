@@ -1,0 +1,96 @@
+diff --git a/packages/coding-agent/changelog.d/coordinator-mcp-strict-tool-ints.md b/packages/coding-agent/changelog.d/coordinator-mcp-strict-tool-ints.md
+new file mode 100644
+index 0000000..c45e36c
+--- /dev/null
++++ b/packages/coding-agent/changelog.d/coordinator-mcp-strict-tool-ints.md
+@@ -0,0 +1,3 @@
++### Fixed
++
++- Coordinator MCP numeric tool arguments now accept only numbers or plain decimal digit strings; malformed values such as `1e4`, `5s`, `1.5` and arrays fall back to each argument's default instead of being partially parsed.
+diff --git a/packages/coding-agent/src/coordinator-mcp/server.ts b/packages/coding-agent/src/coordinator-mcp/server.ts
+index 560d8a3..3d2e50e 100644
+--- a/packages/coding-agent/src/coordinator-mcp/server.ts
++++ b/packages/coding-agent/src/coordinator-mcp/server.ts
+@@ -2620,8 +2620,8 @@ export async function appendCoordinatorEventForTest(
+ 	return appendCoordinatorEvent(namespaceDir, input);
+ }
+ 
+-function boundedEventLimit(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++export function boundedEventLimit(value: unknown): number {
++	const parsed = parseNumericArgument(value);
+ 	if (!Number.isFinite(parsed) || parsed <= 0) return 100;
+ 	return Math.min(parsed, 100);
+ }
+@@ -3189,8 +3189,14 @@ export const COORDINATOR_RUNTIME_PROMPT_ACK_TIMEOUT_MAX_MS = MAX_RUNTIME_PROMPT_
+ export const COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS = 30_000;
+ export const COORDINATOR_POLL_INTERVAL_MAX_MS = 10_000;
+ 
++function parseNumericArgument(value: unknown): number {
++	if (typeof value === "number") return value;
++	if (typeof value !== "string" || !/^\s*\d+\s*$/.test(value)) return Number.NaN;
++	return Number(value);
++}
++
+ function parsePositiveIntegerMs(value: unknown, fallback: number): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = parseNumericArgument(value);
+ 	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+ }
+ 
+@@ -3206,7 +3212,7 @@ export function boundedRuntimePromptAckTimeoutMs(value: unknown): number {
+ }
+ 
+ export function boundedEventWatchTimeoutMs(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = parseNumericArgument(value);
+ 	if (parsed === 0) return 0;
+ 	return Math.min(Number.isFinite(parsed) && parsed > 0 ? parsed : 1000, COORDINATOR_EVENT_WATCH_TIMEOUT_MAX_MS);
+ }
+@@ -3216,7 +3222,7 @@ export function boundedPollIntervalMs(value: unknown): number {
+ }
+ 
+ function boundedLineCount(value: unknown): number {
+-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
++	const parsed = parseNumericArgument(value);
+ 	if (!Number.isFinite(parsed) || parsed <= 0) return 80;
+ 	return Math.min(parsed, 400);
+ }
+diff --git a/packages/coding-agent/test/coordinator-mcp-server.test.ts b/packages/coding-agent/test/coordinator-mcp-server.test.ts
+index 736ca9e..b196593 100644
+--- a/packages/coding-agent/test/coordinator-mcp-server.test.ts
++++ b/packages/coding-agent/test/coordinator-mcp-server.test.ts
+@@ -38,6 +38,10 @@ import {
+ 	appendCoordinatorEventForTest,
+ 	awaitCodexWakePublishesForTest,
+ 	awaitEventWebhookDeliveriesForTest,
++	boundedAwaitTurnTimeoutMs,
++	boundedEventLimit,
++	boundedEventWatchTimeoutMs,
++	boundedPollIntervalMs,
+ 	type CoordinatorMcpServer,
+ 	createCoordinatorMcpServer,
+ 	readCoordinatorArtifact,
+@@ -753,6 +757,22 @@ async function patchTurnDelivery(
+ }
+ 
+ describe("Coordinator MCP canonical SDK controls", () => {
++	it("falls back for malformed numeric tool arguments instead of parsing prefixes", () => {
++		const malformed = ["1e4", "5s", "1.5", [50], {}, true];
++
++		for (const value of malformed) {
++			expect(boundedAwaitTurnTimeoutMs(value)).toBe(1000);
++			expect(boundedEventLimit(value)).toBe(100);
++			expect(boundedEventWatchTimeoutMs(value)).toBe(1000);
++			expect(boundedPollIntervalMs(value)).toBe(100);
++		}
++
++		expect(boundedAwaitTurnTimeoutMs(" 2500 ")).toBe(2500);
++		expect(boundedEventLimit(" 50 ")).toBe(50);
++		expect(boundedEventWatchTimeoutMs("0")).toBe(0);
++		expect(boundedPollIntervalMs(250)).toBe(250);
++	});
++
+ 	it("delivers active feedback as a correlated steer without creating a queued turn", async () => {
+ 		const root = await tempRoot();
+ 		const controls: SdkControl[] = [];

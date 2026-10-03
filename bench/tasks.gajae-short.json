@@ -1,0 +1,57 @@
+{
+  "model": "gpt-5.6-luna",
+  "effort": "low",
+  "gate": {
+    "metric": "total_plus_output",
+    "detail": "changelog_fragment",
+    "min_detail_gain": -1,
+    "max_token_increase": -0.2
+  },
+  "tasks": [
+    {
+      "id": "t6_intargs",
+      "tree": ".targets/gajae-2238ed651",
+      "prompt": "The coordinator MCP server parses its numeric tool arguments (timeouts, poll intervals, limits) with Number.parseInt(String(value)), so malformed values such as \"1e4\", \"5s\", \"1.5\" or [50] silently become 1, 5, 1 or 50 instead of falling back to each argument's default. Accept only numbers and plain decimal digit strings (surrounding whitespace allowed); anything else must use the default. Prepare the change as you would for a pull request to dev.",
+      "check": "checks/gajae/check.py",
+      "check_args": [
+        "~/Downloads/gajae-code",
+        "f79d20b09ab08d9c7b62f3d9da2a1cc5c80f6501",
+        "coding-agent",
+        "packages/coding-agent/test/coordinator-mcp-integer-args.test.ts"
+      ]
+    },
+    {
+      "id": "t7_watchdog",
+      "tree": ".targets/gajae-c9f4946b5",
+      "prompt": "Stream idle and first-event watchdog timeouts in the LLM streaming layer are passed straight to setTimeout. A delay above 2^31-1 ms (for example an env value meant as \"never time out\") makes Bun fire after 1 ms, so the stream aborts immediately. Cap these delays at the setTimeout maximum. Prepare the change as you would for a pull request to dev.",
+      "check": "checks/gajae/check.py",
+      "check_args": [
+        "~/Downloads/gajae-code",
+        "c94130441a76474c20a1086c9588120f66698b6b",
+        "ai",
+        "packages/ai/test/idle-iterator-timer-ceiling.test.ts"
+      ]
+    },
+    {
+      "id": "t8_deadline",
+      "tree": ".targets/gajae-de8d04b5f",
+      "prompt": "Setting GJC_CLEANUP_DEADLINE_MS above 2^31-1 ms makes the shutdown cleanup deadline fire after 1 ms (setTimeout overflow), so cleanup handlers are cut off instead of getting more time. Clamp the deadline to the setTimeout maximum. Prepare the change as you would for a pull request to dev.",
+      "check": "checks/gajae/check.py",
+      "check_args": [
+        "~/Downloads/gajae-code",
+        "faa87198f438fd1c25f7f23ac29da64f26b9c0db",
+        "utils",
+        "packages/utils/test/postmortem.test.ts",
+        "packages/utils/test/postmortem-fixture.ts"
+      ]
+    }
+  ],
+  "limits": [
+    "Same tasks and trees as tasks.gajae.json.",
+    "A keeps the repository's full AGENTS.md (12.5KB); B replaces it with agents/gajae-short.md (1.1KB), whose sections are copied verbatim from the full file."
+  ],
+  "arms": {
+    "A": "repo",
+    "B": "agents/gajae-short.md"
+  }
+}

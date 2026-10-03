@@ -1,0 +1,73 @@
+diff --git a/packages/ai/changelog.d/stream-watchdog-timeout-overflow.md b/packages/ai/changelog.d/stream-watchdog-timeout-overflow.md
+new file mode 100644
+index 0000000..d41797e
+--- /dev/null
++++ b/packages/ai/changelog.d/stream-watchdog-timeout-overflow.md
+@@ -0,0 +1,3 @@
++### Fixed
++
++- Cap stream idle and first-event watchdog delays at the maximum supported by `setTimeout`, preventing very large timeout settings from firing after 1 ms.
+diff --git a/packages/ai/src/utils/idle-iterator.ts b/packages/ai/src/utils/idle-iterator.ts
+index 5ba8b4e..ab5b196 100644
+--- a/packages/ai/src/utils/idle-iterator.ts
++++ b/packages/ai/src/utils/idle-iterator.ts
+@@ -16,6 +16,11 @@ const LM_STUDIO_FIRST_EVENT_TIMEOUT_MS = 300_000;
+ const OLLAMA_CLOUD_FIRST_EVENT_TIMEOUT_MS = 300_000;
+ 
+ const ANTHROPIC_STREAM_IDLE_TIMEOUT_MS = 300_000;
++const MAX_SET_TIMEOUT_DELAY_MS = 2_147_483_647;
++
++function clampSetTimeoutDelayMs(delayMs: number): number {
++	return Math.min(delayMs, MAX_SET_TIMEOUT_DELAY_MS);
++}
+ 
+ export function getProviderStreamIdleTimeoutFallbackMs(provider: string): number | undefined {
+ 	if (provider === "anthropic" || provider === "xai" || provider === "grok-build") {
+@@ -211,7 +216,7 @@ clearTimeout(dummyWatchdog);
+  */
+ export function createWatchdog(timeoutMs: number | undefined, onTimeout: () => void): Watchdog {
+ 	if (timeoutMs !== undefined && timeoutMs > 0) {
+-		return setTimeout(onTimeout, timeoutMs);
++		return setTimeout(onTimeout, clampSetTimeoutDelayMs(timeoutMs));
+ 	}
+ 	return undefined;
+ }
+@@ -338,7 +343,7 @@ export async function* iterateWithIdleTimeout<T>(
+ 			if (enforceTimeout) {
+ 				const { promise, resolve } = Promise.withResolvers<{ kind: "timeout" }>();
+ 				resolveTimeout = resolve;
+-				timer = setTimeout(() => resolve({ kind: "timeout" }), activeTimeoutMs);
++				timer = setTimeout(() => resolve({ kind: "timeout" }), clampSetTimeoutDelayMs(activeTimeoutMs!));
+ 				racers.push(promise);
+ 			}
+ 
+diff --git a/packages/ai/test/stream-timeout-defaults.test.ts b/packages/ai/test/stream-timeout-defaults.test.ts
+index d0e540d..440d7ea 100644
+--- a/packages/ai/test/stream-timeout-defaults.test.ts
++++ b/packages/ai/test/stream-timeout-defaults.test.ts
+@@ -1,5 +1,6 @@
+-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
++import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+ import {
++	createWatchdog,
+ 	getOpenAIStreamIdleTimeoutMs,
+ 	getProviderFirstEventTimeoutFallbackMs,
+ 	getProviderStreamIdleTimeoutFallbackMs,
+@@ -60,6 +61,17 @@ describe("getProviderStreamIdleTimeoutFallbackMs(provider)", () => {
+ 		expect(getProviderStreamIdleTimeoutFallbackMs("openai")).toBeUndefined();
+ 	});
+ });
++
++describe("stream watchdog timer delays", () => {
++	it("caps first-event watchdog delays at the setTimeout maximum", () => {
++		const timeoutSpy = spyOn(globalThis, "setTimeout");
++		const watchdog = createWatchdog(2_147_483_648, () => {});
++
++		expect(timeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), 2_147_483_647);
++		if (watchdog) clearTimeout(watchdog);
++		timeoutSpy.mockRestore();
++	});
++});
+ describe("getProviderFirstEventTimeoutFallbackMs(provider)", () => {
+ 	it("gives Alibaba Token Plan one continuous 600-second first-event window", () => {
+ 		expect(getProviderFirstEventTimeoutFallbackMs("alibaba-token-plan")).toBe(600_000);

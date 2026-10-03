@@ -1,0 +1,21 @@
+diff --git a/packages/utils/src/postmortem.ts b/packages/utils/src/postmortem.ts
+index 1d22f6b..514f145 100644
+--- a/packages/utils/src/postmortem.ts
++++ b/packages/utils/src/postmortem.ts
+@@ -131,13 +131,15 @@ function runCleanup(reason: Reason, options: CleanupOptions = {}): Promise<void>
+  * the default).
+  */
+ const DEFAULT_CLEANUP_DEADLINE_MS = 5_000;
++// Delays above this value overflow to a 1ms timer in Node/Bun.
++const MAX_TIMER_DELAY_MS = 2_147_483_647;
+ 
+ function resolveCleanupDeadlineMs(): number {
+ 	const raw = process.env.GJC_CLEANUP_DEADLINE_MS;
+ 	if (raw === undefined || raw.trim() === "") return DEFAULT_CLEANUP_DEADLINE_MS;
+ 	const parsed = Number(raw);
+ 	if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_CLEANUP_DEADLINE_MS;
+-	return parsed;
++	return Math.min(parsed, MAX_TIMER_DELAY_MS);
+ }
+ 
+ async function awaitCleanupWithDeadline(reason: Reason, options: CleanupOptions = {}): Promise<void> {

@@ -1,0 +1,36 @@
+diff --git a/sqlglot/dialects/clickhouse.py b/sqlglot/dialects/clickhouse.py
+index 75a0388..e48bcc2 100644
+--- a/sqlglot/dialects/clickhouse.py
++++ b/sqlglot/dialects/clickhouse.py
+@@ -305,6 +305,7 @@ class ClickHouse(Dialect):
+             "ARRAYSUM": exp.ArraySum.from_arg_list,
+             "ARRAYREVERSE": exp.ArrayReverse.from_arg_list,
+             "ARRAYSLICE": exp.ArraySlice.from_arg_list,
++            "BITCOUNT": exp.BitCount.from_arg_list,
+             "COUNTIF": _build_count_if,
+             "DATE_ADD": build_date_delta(exp.DateAdd, default_unit=None),
+             "DATEADD": build_date_delta(exp.DateAdd, default_unit=None),
+@@ -1072,6 +1073,7 @@ class ClickHouse(Dialect):
+             exp.ArrayReverse: rename_func("arrayReverse"),
+             exp.ArraySlice: rename_func("arraySlice"),
+             exp.ArraySum: rename_func("arraySum"),
++            exp.BitCount: rename_func("bitCount"),
+             exp.ArgMax: arg_max_or_min_no_count("argMax"),
+             exp.ArgMin: arg_max_or_min_no_count("argMin"),
+             exp.Array: inline_array_sql,
+diff --git a/sqlglot/expressions.py b/sqlglot/expressions.py
+index 522fd50..86f5175 100644
+--- a/sqlglot/expressions.py
++++ b/sqlglot/expressions.py
+@@ -6475,6 +6475,11 @@ class Length(Func):
+     _sql_names = ["LENGTH", "LEN", "CHAR_LENGTH", "CHARACTER_LENGTH"]
+ 
+ 
++class BitCount(Func):
++    arg_types = {"this": True}
++    _sql_names = ["BIT_COUNT"]
++
++
+ class Levenshtein(Func):
+     arg_types = {
+         "this": True,

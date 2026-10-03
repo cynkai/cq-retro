@@ -1,0 +1,5 @@
+Reading additional input from stdin...
+2026-10-03T12:15:20.938029Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /var/folders/c0/t6rbng510kb6qd1zd_ydlvz40000gn/T/cq-ab-ITfhWH/t7_watchdog-A-2/packages/ai/src/utils/idle-iterator.ts:
+				timer = setTimeout(() => resolveTimeout!({ kind: "timeout" }), activeTimeoutMs);
+2026-10-03T12:15:32.963703Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /var/folders/c0/t6rbng510kb6qd1zd_ydlvz40000gn/T/cq-ab-ITfhWH/t7_watchdog-A-2/packages/ai/src/utils/idle-iterator.ts:
+				timer = setTimeout(() => resolveTimeout({ kind: "timeout" }), activeTimeoutMs);
